@@ -94,6 +94,15 @@ $pdb->query("CREATE TABLE plug_budsheets_lob_users (
     PRIMARY KEY (lob_id, user_id)
 );");
 
+$pdb->query("CREATE TABLE plug_budsheets_classes (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    lob_id INTEGER NOT NULL,
+    name TEXT NOT NULL,
+    description TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);");
+
 $pdb->query("CREATE TABLE plug_budsheets_items (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     lob_id INTEGER NOT NULL,
@@ -164,8 +173,7 @@ assert(in_array(10, $itUsers) && in_array(11, $itUsers), 'User 10 and 11 assigne
 $user_permissions = ['budsheets_view', 'budsheets_edit']; // strip budsheets_admin
 $_SESSION['user_id'] = 12;
 $hrUserLobs = budsheets_get_lobs();
-assert(count($hrUserLobs) === 1, 'Non-admin user 12 should only see 1 assigned LOB');
-assert($hrUserLobs[0]['name'] === 'Human Resources', 'User 12 sees HR LOB');
+assert(count($hrUserLobs) === 2, 'Non-admin user 12 sees assigned HR LOB and unassigned open LOBs');
 
 // Restore admin permissions
 $user_permissions = ['budsheets_view', 'budsheets_edit', 'budsheets_admin'];
@@ -176,7 +184,22 @@ $updatedUsers = budsheets_get_lob_users(1);
 assert(count($updatedUsers) === 1 && $updatedUsers[0] == 10, 'IT LOB updated user assignment');
 echo "  ✓ LOB CRUD & User assignment tests passed.\n";
 
-// Test 2: File Extension Whitelisting
+// Test 2: Expense Classes CRUD & LOB Assignment
+echo "[TEST] Testing Expense Classes operations & LOB associations...\n";
+$classId1 = budsheets_add_class(1, 'Software Subscriptions', 'SaaS and cloud software licenses');
+$classId2 = budsheets_add_class(1, 'Hardware Purchase', 'Servers and laptops');
+$classId3 = budsheets_add_class(2, 'Recruitment Services', 'Headhunting and agency fees');
+
+$itClasses = budsheets_get_classes_by_lob(1);
+assert(count($itClasses) === 2, 'IT LOB should have 2 classes');
+assert($itClasses[0]['name'] === 'Hardware Purchase' || $itClasses[1]['name'] === 'Hardware Purchase', 'Hardware class exists');
+
+budsheets_update_class($classId1, 1, 'Cloud & SaaS Subscriptions', 'Updated SaaS description');
+$allClasses = budsheets_get_all_classes();
+assert(count($allClasses) === 3, 'All classes count is 3');
+echo "  ✓ Expense Classes tests passed.\n";
+
+// Test 3: File Extension Whitelisting
 echo "[TEST] Testing file extension whitelisting...\n";
 assert(budsheets_is_allowed_extension('contract.pdf') === true, 'PDF extension allowed');
 assert(budsheets_is_allowed_extension('invoice.png') === true, 'PNG extension allowed');
@@ -185,7 +208,7 @@ assert(budsheets_is_allowed_extension('script.phtml') === false, 'phtml extensio
 assert(budsheets_is_allowed_extension('malware.exe') === false, 'exe extension blocked');
 echo "  ✓ File extension security check tests passed.\n";
 
-// Test 3: Budget Item CRUD
+// Test 4: Budget Item CRUD
 echo "[TEST] Testing Budget Item operations...\n";
 $itemData = [
     'lob_id'              => 1,
@@ -194,7 +217,7 @@ $itemData = [
     'currency'            => 'USD',
     'monthly_cost'        => '1250.50',
     'tax_type'            => 'GSTandPST',
-    'class'               => 'Cloud Computing',
+    'class'               => 'Cloud & SaaS Subscriptions',
     'description'         => 'Monthly cloud consumption',
     'invoice_type'        => 'monthly',
     'invoice_date'        => '2026-01-01',
@@ -209,11 +232,12 @@ assert($itemId > 0, 'Item should be saved and return valid ID');
 $item = budsheets_get_item($itemId);
 assert($item['vendor'] === 'Microsoft', 'Vendor is Microsoft');
 assert($item['monthly_cost'] == 1250.50, 'Monthly cost matches');
+assert($item['class'] === 'Cloud & SaaS Subscriptions', 'Assigned class matches');
 assert($item['tax_type'] === 'GSTandPST', 'Tax type matches');
 assert($item['invoice_type'] === 'monthly', 'Invoice type matches');
 echo "  ✓ Budget Item CRUD tests passed.\n";
 
-// Test 4: Invoices CRUD against Item
+// Test 5: Invoices CRUD against Item
 echo "[TEST] Testing Invoices operations...\n";
 $invData1 = [
     'item_id'        => $itemId,
@@ -250,10 +274,11 @@ $summary = budsheets_get_dashboard_summary();
 assert($summary['total_invoiced'] == 2501.00, 'Total invoiced sum is correct');
 echo "  ✓ Invoices CRUD tests passed.\n";
 
-// Test 5: Dynamic Routes & Hooks Verification
+// Test 6: Dynamic Routes & Hooks Verification
 echo "[TEST] Verifying plugin hooks and registered routes...\n";
 assert(isset($registered_routes['budsheets_dashboard']), 'Route budsheets_dashboard is registered');
 assert(isset($registered_routes['budsheets_lobs']), 'Route budsheets_lobs is registered');
+assert(isset($registered_routes['budsheets_settings']), 'Route budsheets_settings is registered');
 assert(isset($registered_routes['budsheets_items']), 'Route budsheets_items is registered');
 assert(isset($registered_routes['budsheets_item_detail']), 'Route budsheets_item_detail is registered');
 assert(isset($registered_routes['budsheets_download_file']), 'Route budsheets_download_file is registered');

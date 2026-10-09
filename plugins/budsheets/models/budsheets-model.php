@@ -104,12 +104,12 @@ function budsheets_get_lobs($user_id = null) {
         return $pdb->query("SELECT * FROM {$table} ORDER BY name ASC")->fetchAll();
     }
 
-    // Filter by assigned user LOBs for non-admin users
+    // Non-admin users see LOBs assigned to them OR open LOBs (no specific user restrictions)
     $currentUserId = ($user_id !== null) ? $user_id : ($_SESSION['user_id'] ?? 0);
     $sql = "SELECT l.*
             FROM {$table} l
-            INNER JOIN {$userLobTable} lu ON l.id = lu.lob_id
-            WHERE lu.user_id = ?
+            WHERE l.id IN (SELECT lob_id FROM {$userLobTable} WHERE user_id = ?)
+               OR l.id NOT IN (SELECT DISTINCT lob_id FROM {$userLobTable})
             ORDER BY l.name ASC";
     return $pdb->query($sql, [(int)$currentUserId])->fetchAll();
 }
@@ -122,7 +122,11 @@ function budsheets_user_has_lob_access($lob_id, $user_id = null) {
     $pdb = budsheets_db();
     if (!$pdb) return false;
     $userLobTable = $pdb->getTableName('lob_users');
-    $row = $pdb->query("SELECT 1 FROM {$userLobTable} WHERE lob_id = ? AND user_id = ?", [(int)$lob_id, (int)$currentUserId])->fetch();
+
+    $sql = "SELECT 1 FROM {$userLobTable} WHERE lob_id = ? AND user_id = ?
+            UNION
+            SELECT 1 WHERE NOT EXISTS (SELECT 1 FROM {$userLobTable} WHERE lob_id = ?)";
+    $row = $pdb->query($sql, [(int)$lob_id, (int)$currentUserId, (int)$lob_id])->fetch();
     return !empty($row);
 }
 
@@ -214,6 +218,60 @@ function budsheets_get_all_system_users() {
 }
 
 // ==========================================
+// Classes Operations
+// ==========================================
+
+function budsheets_get_classes_by_lob($lob_id) {
+    $pdb = budsheets_db();
+    if (!$pdb || !$lob_id) return [];
+    $table = $pdb->getTableName('classes');
+    return $pdb->query("SELECT * FROM {$table} WHERE lob_id = ? ORDER BY name ASC", [(int)$lob_id])->fetchAll();
+}
+
+function budsheets_get_all_classes() {
+    $pdb = budsheets_db();
+    if (!$pdb) return [];
+    $classTable = $pdb->getTableName('classes');
+    $lobTable = $pdb->getTableName('lines_of_business');
+    $sql = "SELECT c.*, l.name as lob_name
+            FROM {$classTable} c
+            LEFT JOIN {$lobTable} l ON c.lob_id = l.id
+            ORDER BY l.name ASC, c.name ASC";
+    return $pdb->query($sql)->fetchAll();
+}
+
+function budsheets_add_class($lob_id, $name, $description = '') {
+    $pdb = budsheets_db();
+    if (!$pdb) return false;
+    $table = $pdb->getTableName('classes');
+    $pdb->query("INSERT INTO {$table} (lob_id, name, description) VALUES (?, ?, ?)", [
+        (int)$lob_id,
+        trim($name),
+        trim($description)
+    ]);
+    return budsheets_last_insert_id($pdb);
+}
+
+function budsheets_update_class($id, $lob_id, $name, $description = '') {
+    $pdb = budsheets_db();
+    if (!$pdb) return false;
+    $table = $pdb->getTableName('classes');
+    return $pdb->query("UPDATE {$table} SET lob_id = ?, name = ?, description = ? WHERE id = ?", [
+        (int)$lob_id,
+        trim($name),
+        trim($description),
+        (int)$id
+    ]);
+}
+
+function budsheets_delete_class($id) {
+    $pdb = budsheets_db();
+    if (!$pdb) return false;
+    $table = $pdb->getTableName('classes');
+    return $pdb->query("DELETE FROM {$table} WHERE id = ?", [(int)$id]);
+}
+
+// ==========================================
 // Budget Items Operations
 // ==========================================
 
@@ -237,7 +295,7 @@ function budsheets_get_items($lob_id = null) {
 
     if (!has_permission('budsheets_admin')) {
         $currentUserId = $_SESSION['user_id'] ?? 0;
-        $where[] = "i.lob_id IN (SELECT lob_id FROM {$userLobTable} WHERE user_id = ?)";
+        $where[] = "(i.lob_id IN (SELECT lob_id FROM {$userLobTable} WHERE user_id = ?) OR i.lob_id NOT IN (SELECT DISTINCT lob_id FROM {$userLobTable}))";
         $params[] = (int)$currentUserId;
     }
 
@@ -264,7 +322,7 @@ function budsheets_get_item($id) {
 
     if (!has_permission('budsheets_admin')) {
         $currentUserId = $_SESSION['user_id'] ?? 0;
-        $sql .= " AND i.lob_id IN (SELECT lob_id FROM {$userLobTable} WHERE user_id = ?)";
+        $sql .= " AND (i.lob_id IN (SELECT lob_id FROM {$userLobTable} WHERE user_id = ?) OR i.lob_id NOT IN (SELECT DISTINCT lob_id FROM {$userLobTable}))";
         $params[] = (int)$currentUserId;
     }
 

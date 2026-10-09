@@ -14,7 +14,7 @@ if (!has_permission('budsheets_view')) {
 $lobs = budsheets_get_lobs();
 $message = '';
 $error = '';
-$action = $_GET['action'] ?? ($_POST['action'] ?? 'list');
+$action = $_POST['action'] ?? ($_GET['action'] ?? 'list');
 $filterLob = isset($_GET['lob_id']) ? (int)$_GET['lob_id'] : null;
 
 // Handle Form Submissions
@@ -69,6 +69,13 @@ if ($action === 'edit' && !empty($_GET['id'])) {
 }
 
 $items = budsheets_get_items($filterLob);
+
+// Build map of classes per LOB
+$allClasses = budsheets_get_all_classes();
+$lobClassesMap = [];
+foreach ($allClasses as $c) {
+    $lobClassesMap[$c['lob_id']][] = $c['name'];
+}
 ?>
 
 <div class="container-fluid py-4">
@@ -103,7 +110,7 @@ $items = budsheets_get_items($filterLob);
                     <div class="row g-3">
                         <div class="col-md-6">
                             <label class="form-label fw-semibold">Line of Business <span class="text-danger">*</span></label>
-                            <select name="lob_id" class="form-select" required>
+                            <select name="lob_id" id="lob_select" class="form-select" onchange="updateClassOptions()" required>
                                 <option value="">-- Select Line of Business --</option>
                                 <?php foreach ($lobs as $lob): ?>
                                     <option value="<?= (int)$lob['id'] ?>" <?= ($editItem && $editItem['lob_id'] == $lob['id']) || ($filterLob == $lob['id']) ? 'selected' : '' ?>>
@@ -115,7 +122,12 @@ $items = budsheets_get_items($filterLob);
 
                         <div class="col-md-6">
                             <label class="form-label fw-semibold">Class / Category</label>
-                            <input type="text" name="class" class="form-control" value="<?= e($editItem['class'] ?? '') ?>" placeholder="e.g. Software, Hardware, Consulting">
+                            <select name="class" id="class_select" class="form-select">
+                                <option value="">-- Select Class --</option>
+                                <?php if ($editItem && !empty($editItem['class'])): ?>
+                                    <option value="<?= e($editItem['class']) ?>" selected><?= e($editItem['class']) ?></option>
+                                <?php endif; ?>
+                            </select>
                         </div>
 
                         <div class="col-md-6">
@@ -201,6 +213,39 @@ $items = budsheets_get_items($filterLob);
                 </form>
             </div>
         </div>
+
+        <script>
+            const lobClassesMap = <?= json_encode($lobClassesMap) ?>;
+            const currentSelectedClass = <?= json_encode($editItem['class'] ?? '') ?>;
+
+            function updateClassOptions() {
+                const lobSelect = document.getElementById('lob_select');
+                const classSelect = document.getElementById('class_select');
+                const selectedLobId = lobSelect.value;
+
+                classSelect.innerHTML = '<option value="">-- Select Class --</option>';
+
+                if (selectedLobId && lobClassesMap[selectedLobId]) {
+                    lobClassesMap[selectedLobId].forEach(function(className) {
+                        const opt = document.createElement('option');
+                        opt.value = className;
+                        opt.textContent = className;
+                        if (className === currentSelectedClass) {
+                            opt.selected = true;
+                        }
+                        classSelect.appendChild(opt);
+                    });
+                } else if (currentSelectedClass) {
+                    const opt = document.createElement('option');
+                    opt.value = currentSelectedClass;
+                    opt.textContent = currentSelectedClass;
+                    opt.selected = true;
+                    classSelect.appendChild(opt);
+                }
+            }
+
+            document.addEventListener('DOMContentLoaded', updateClassOptions);
+        </script>
 
     <?php else: ?>
         <!-- List View -->

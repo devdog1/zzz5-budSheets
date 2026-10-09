@@ -1,8 +1,8 @@
 <?php
 /**
  * Plugin Name: Operational Budget Sheets (BudSheets)
- * Description: Operational budget tracking plugin. Manage Lines of Business, budget items, contract documents, and invoices.
- * Version: 1.0.0
+ * Description: Operational budget tracking plugin. Manage Lines of Business, expense classes, budget items, contract documents, and invoices.
+ * Version: 1.1.0
  * Author: DevDog
  * Permissions: budsheets_view, budsheets_edit, budsheets_admin
  * Roles: admin:budsheets_view,budsheets_edit,budsheets_admin; editor:budsheets_view,budsheets_edit; viewer:budsheets_view
@@ -28,6 +28,7 @@ add_filter('theme_nav_links', function ($links) {
 
     if (has_permission('budsheets_admin')) {
         $children[] = ['label' => 'Lines of Business', 'icon' => 'fa-solid fa-sitemap', 'route' => 'budsheets_lobs'];
+        $children[] = ['label' => 'Settings & Classes', 'icon' => 'fa-solid fa-gear', 'route' => 'budsheets_settings'];
     }
 
     $links[] = [
@@ -89,6 +90,13 @@ add_action('register_routes', function() {
             die('Access Denied');
         }
         require_once __DIR__ . '/views/lobs.php';
+    });
+
+    register_route('budsheets_settings', function() {
+        if (!has_permission('budsheets_admin')) {
+            die('Access Denied');
+        }
+        require_once __DIR__ . '/views/settings.php';
     });
 
     register_route('budsheets_items', function() {
