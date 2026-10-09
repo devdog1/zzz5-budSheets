@@ -57,6 +57,19 @@ function budsheets_db() {
 }
 
 /**
+ * Get last insert ID safely across PluginDatabase versions or direct PDO
+ */
+function budsheets_last_insert_id($pdb) {
+    if (method_exists($pdb, 'lastInsertId')) {
+        return $pdb->lastInsertId();
+    }
+    if (function_exists('get_db_connection')) {
+        return get_db_connection()->lastInsertId();
+    }
+    return 0;
+}
+
+/**
  * Get upload directory path
  */
 function budsheets_upload_dir() {
@@ -129,7 +142,7 @@ function budsheets_add_lob($name, $code = '', $description = '', $user_ids = [])
         trim($code),
         trim($description)
     ]);
-    $lob_id = $pdb->lastInsertId();
+    $lob_id = budsheets_last_insert_id($pdb);
 
     if ($lob_id && !empty($user_ids)) {
         budsheets_set_lob_users($lob_id, $user_ids);
@@ -305,7 +318,7 @@ function budsheets_save_item($data, $item_id = null) {
         $fields['created_by'] = $userId;
         $sql = "INSERT INTO {$table} (lob_id, vendor, product, currency, monthly_cost, tax_type, class, description, invoice_type, invoice_date, contract_start_date, contract_end_date, long_description, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
         $pdb->query($sql, array_values($fields));
-        return $pdb->lastInsertId();
+        return budsheets_last_insert_id($pdb);
     }
 }
 
@@ -508,7 +521,7 @@ function budsheets_save_invoice($data, $file = null, $invoice_id = null) {
             $storedName,
             $userId
         ]);
-        return $pdb->lastInsertId();
+        return budsheets_last_insert_id($pdb);
     }
 }
 
