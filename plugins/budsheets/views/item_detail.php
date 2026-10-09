@@ -397,27 +397,30 @@ $fullMonthsNames = [
                                     <td class="fw-bold text-success">$<?= number_format($invCad, 2) ?> CAD</td>
                                     <td>
                                         <?php if ($inv['attachment_original_name']): ?>
-                                            <a href="<?= url_for('budsheets_download_file') ?>&file_type=invoice&file_id=<?= (int)$inv['id'] ?>&disposition=inline" target="_blank" class="badge bg-info text-decoration-none me-1" title="View in Browser">
-                                                <i class="fa-solid fa-eye me-1"></i>View
-                                            </a>
-                                            <a href="<?= url_for('budsheets_download_file') ?>&file_type=invoice&file_id=<?= (int)$inv['id'] ?>&disposition=attachment" class="badge bg-secondary text-decoration-none" title="Download File">
-                                                <i class="fa-solid fa-download me-1"></i><?= e($inv['attachment_original_name']) ?>
-                                            </a>
+                                            <span class="small text-dark fw-semibold"><i class="fa-solid fa-paperclip me-1 text-muted"></i><?= e($inv['attachment_original_name']) ?></span>
                                         <?php else: ?>
                                             <span class="text-muted">—</span>
                                         <?php endif; ?>
                                     </td>
                                     <td class="small text-muted"><?= e($inv['comments'] ?: '—') ?></td>
                                     <td class="text-end pe-3">
+                                        <?php if ($inv['attachment_original_name']): ?>
+                                            <a href="<?= url_for('budsheets_download_file') ?>&file_type=invoice&file_id=<?= (int)$inv['id'] ?>&disposition=inline" target="_blank" class="btn btn-sm btn-outline-info me-1" title="View in Browser">
+                                                <i class="fa-solid fa-eye"></i>
+                                            </a>
+                                            <a href="<?= url_for('budsheets_download_file') ?>&file_type=invoice&file_id=<?= (int)$inv['id'] ?>&disposition=attachment" class="btn btn-sm btn-outline-secondary me-1" title="Download File">
+                                                <i class="fa-solid fa-download"></i>
+                                            </a>
+                                        <?php endif; ?>
                                         <?php if (has_permission('budsheets_edit')): ?>
-                                            <button type="button" class="btn btn-sm btn-outline-secondary me-1" data-bs-toggle="modal" data-bs-target="#editInvoiceModal<?= (int)$inv['id'] ?>">
+                                            <button type="button" class="btn btn-sm btn-outline-secondary me-1" data-bs-toggle="modal" data-bs-target="#editInvoiceModal<?= (int)$inv['id'] ?>" title="Edit Invoice Record">
                                                 <i class="fa-solid fa-pen-to-square"></i>
                                             </button>
                                             <form method="POST" class="d-inline" onsubmit="return confirm('Delete this invoice record?');">
                                                 <?php if (function_exists('csrf_field')) echo csrf_field(); ?>
                                                 <input type="hidden" name="action" value="delete_invoice">
                                                 <input type="hidden" name="invoice_id" value="<?= (int)$inv['id'] ?>">
-                                                <button type="submit" class="btn btn-sm btn-outline-danger">
+                                                <button type="submit" class="btn btn-sm btn-outline-danger" title="Delete Invoice">
                                                     <i class="fa-solid fa-trash"></i>
                                                 </button>
                                             </form>
