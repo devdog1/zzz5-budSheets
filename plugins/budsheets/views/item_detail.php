@@ -216,22 +216,30 @@ foreach ($invoices as $inv) {
                     <?php else: ?>
                         <ul class="list-group list-group-flush">
                             <?php foreach ($contracts as $c): ?>
-                                <li class="list-group-item d-flex justify-content-between align-items-center px-0">
-                                    <div class="text-truncate me-2" style="max-width: 200px;">
-                                        <i class="fa-solid fa-paperclip me-1 text-muted"></i>
-                                        <a href="<?= url_for('budsheets_download_file') ?>&file_type=contract&file_id=<?= (int)$c['id'] ?>" class="fw-semibold text-decoration-none">
-                                            <?= e($c['original_filename']) ?>
-                                        </a>
-                                        <div class="small text-muted"><?= round($c['file_size'] / 1024, 1) ?> KB</div>
+                                <li class="list-group-item px-0">
+                                    <div class="d-flex justify-content-between align-items-center mb-1">
+                                        <div class="text-truncate me-2" style="max-width: 180px;">
+                                            <i class="fa-solid fa-paperclip me-1 text-muted"></i>
+                                            <span class="fw-semibold text-dark"><?= e($c['original_filename']) ?></span>
+                                        </div>
+                                        <div>
+                                            <a href="<?= url_for('budsheets_download_file') ?>&file_type=contract&file_id=<?= (int)$c['id'] ?>&disposition=inline" target="_blank" class="btn btn-sm btn-outline-info me-1" title="View in Browser">
+                                                <i class="fa-solid fa-eye"></i>
+                                            </a>
+                                            <a href="<?= url_for('budsheets_download_file') ?>&file_type=contract&file_id=<?= (int)$c['id'] ?>&disposition=attachment" class="btn btn-sm btn-outline-secondary me-1" title="Download File">
+                                                <i class="fa-solid fa-download"></i>
+                                            </a>
+                                            <?php if (has_permission('budsheets_edit')): ?>
+                                                <form method="POST" class="d-inline" onsubmit="return confirm('Remove this contract document?');">
+                                                    <?php if (function_exists('csrf_field')) echo csrf_field(); ?>
+                                                    <input type="hidden" name="action" value="delete_contract_file">
+                                                    <input type="hidden" name="file_id" value="<?= (int)$c['id'] ?>">
+                                                    <button type="submit" class="btn btn-sm btn-outline-danger" title="Delete File"><i class="fa-solid fa-trash"></i></button>
+                                                </form>
+                                            <?php endif; ?>
+                                        </div>
                                     </div>
-                                    <?php if (has_permission('budsheets_edit')): ?>
-                                        <form method="POST" onsubmit="return confirm('Remove this contract document?');">
-                                            <?php if (function_exists('csrf_field')) echo csrf_field(); ?>
-                                            <input type="hidden" name="action" value="delete_contract_file">
-                                            <input type="hidden" name="file_id" value="<?= (int)$c['id'] ?>">
-                                            <button type="submit" class="btn btn-sm btn-link text-danger p-0 ms-2"><i class="fa-solid fa-xmark"></i></button>
-                                        </form>
-                                    <?php endif; ?>
+                                    <div class="small text-muted ms-3"><?= round($c['file_size'] / 1024, 1) ?> KB</div>
                                 </li>
                             <?php endforeach; ?>
                         </ul>
@@ -294,8 +302,11 @@ foreach ($invoices as $inv) {
                                     <td class="fw-bold text-success">$<?= number_format($invCad, 2) ?> CAD</td>
                                     <td>
                                         <?php if ($inv['attachment_original_name']): ?>
-                                            <a href="<?= url_for('budsheets_download_file') ?>&file_type=invoice&file_id=<?= (int)$inv['id'] ?>" class="badge bg-secondary text-decoration-none">
-                                                <i class="fa-solid fa-paperclip me-1"></i><?= e($inv['attachment_original_name']) ?>
+                                            <a href="<?= url_for('budsheets_download_file') ?>&file_type=invoice&file_id=<?= (int)$inv['id'] ?>&disposition=inline" target="_blank" class="badge bg-info text-decoration-none me-1" title="View in Browser">
+                                                <i class="fa-solid fa-eye me-1"></i>View
+                                            </a>
+                                            <a href="<?= url_for('budsheets_download_file') ?>&file_type=invoice&file_id=<?= (int)$inv['id'] ?>&disposition=attachment" class="badge bg-secondary text-decoration-none" title="Download File">
+                                                <i class="fa-solid fa-download me-1"></i><?= e($inv['attachment_original_name']) ?>
                                             </a>
                                         <?php else: ?>
                                             <span class="text-muted">—</span>

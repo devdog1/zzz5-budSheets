@@ -728,12 +728,13 @@ function budsheets_get_dashboard_summary() {
 }
 
 // ==========================================
-// File Download & CSV Export Handlers
+// File Download & Inline View Handlers
 // ==========================================
 
 function budsheets_handle_file_download() {
     $fileType = $_GET['file_type'] ?? '';
     $fileId = (int)($_GET['file_id'] ?? 0);
+    $disposition = ($_GET['disposition'] ?? 'attachment') === 'inline' ? 'inline' : 'attachment';
 
     if (!$fileId) {
         die('Invalid file parameters');
@@ -766,7 +767,7 @@ function budsheets_handle_file_download() {
     // Access check: verify user has access to item's LOB
     $item = budsheets_get_item($itemId);
     if (!$item) {
-        die('Access Denied: You do not have permissions to download files for this item.');
+        die('Access Denied: You do not have permissions to download or view files for this item.');
     }
 
     $filePath = budsheets_upload_dir() . $storedName;
@@ -774,9 +775,21 @@ function budsheets_handle_file_download() {
         die('File does not exist on disk');
     }
 
+    $ext = strtolower(pathinfo($origName, PATHINFO_EXTENSION));
+    $mimeTypes = [
+        'pdf'  => 'application/pdf',
+        'png'  => 'image/png',
+        'jpg'  => 'image/jpeg',
+        'jpeg' => 'image/jpeg',
+        'webp' => 'image/webp',
+        'txt'  => 'text/plain'
+    ];
+
+    $contentType = $mimeTypes[$ext] ?? 'application/octet-stream';
+
     header('Content-Description: File Transfer');
-    header('Content-Type: application/octet-stream');
-    header('Content-Disposition: attachment; filename="' . basename($origName) . '"');
+    header('Content-Type: ' . $contentType);
+    header('Content-Disposition: ' . $disposition . '; filename="' . basename($origName) . '"');
     header('Expires: 0');
     header('Cache-Control: must-revalidate');
     header('Pragma: public');
