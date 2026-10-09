@@ -17,50 +17,50 @@ $systemUsers = budsheets_get_all_system_users();
 
 // Handle Actions
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    if (function_exists('validate_csrf') && !validate_csrf()) {
-        $error = 'CSRF verification failed.';
-    } else {
-        $action = $_POST['action'] ?? '';
+    if (function_exists('validate_csrf')) {
+        validate_csrf();
+    }
 
-        if ($action === 'create_lob') {
-            $name = trim($_POST['name'] ?? '');
-            $code = trim($_POST['code'] ?? '');
-            $description = trim($_POST['description'] ?? '');
-            $assigned_users = $_POST['assigned_users'] ?? [];
+    $action = $_POST['action'] ?? '';
 
-            if (empty($name)) {
-                $error = 'Line of Business name is required.';
+    if ($action === 'create_lob') {
+        $name = trim($_POST['name'] ?? '');
+        $code = trim($_POST['code'] ?? '');
+        $description = trim($_POST['description'] ?? '');
+        $assigned_users = $_POST['assigned_users'] ?? [];
+
+        if (empty($name)) {
+            $error = 'Line of Business name is required.';
+        } else {
+            if (budsheets_add_lob($name, $code, $description, $assigned_users)) {
+                $message = 'Line of Business created successfully.';
             } else {
-                if (budsheets_add_lob($name, $code, $description, $assigned_users)) {
-                    $message = 'Line of Business created successfully.';
-                } else {
-                    $error = 'Failed to create Line of Business.';
-                }
+                $error = 'Failed to create Line of Business.';
             }
-        } elseif ($action === 'update_lob') {
-            $lob_id = (int)($_POST['lob_id'] ?? 0);
-            $name = trim($_POST['name'] ?? '');
-            $code = trim($_POST['code'] ?? '');
-            $description = trim($_POST['description'] ?? '');
-            $assigned_users = $_POST['assigned_users'] ?? [];
+        }
+    } elseif ($action === 'update_lob') {
+        $lob_id = (int)($_POST['lob_id'] ?? 0);
+        $name = trim($_POST['name'] ?? '');
+        $code = trim($_POST['code'] ?? '');
+        $description = trim($_POST['description'] ?? '');
+        $assigned_users = $_POST['assigned_users'] ?? [];
 
-            if (!$lob_id || empty($name)) {
-                $error = 'Invalid input for updating Line of Business.';
+        if (!$lob_id || empty($name)) {
+            $error = 'Invalid input for updating Line of Business.';
+        } else {
+            if (budsheets_update_lob($lob_id, $name, $code, $description, $assigned_users)) {
+                $message = 'Line of Business updated successfully.';
             } else {
-                if (budsheets_update_lob($lob_id, $name, $code, $description, $assigned_users)) {
-                    $message = 'Line of Business updated successfully.';
-                } else {
-                    $error = 'Failed to update Line of Business.';
-                }
+                $error = 'Failed to update Line of Business.';
             }
-        } elseif ($action === 'delete_lob') {
-            $lob_id = (int)($_POST['lob_id'] ?? 0);
-            if ($lob_id) {
-                if (budsheets_delete_lob($lob_id)) {
-                    $message = 'Line of Business deleted successfully.';
-                } else {
-                    $error = 'Failed to delete Line of Business.';
-                }
+        }
+    } elseif ($action === 'delete_lob') {
+        $lob_id = (int)($_POST['lob_id'] ?? 0);
+        if ($lob_id) {
+            if (budsheets_delete_lob($lob_id)) {
+                $message = 'Line of Business deleted successfully.';
+            } else {
+                $error = 'Failed to delete Line of Business.';
             }
         }
     }

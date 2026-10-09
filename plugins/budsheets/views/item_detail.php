@@ -23,61 +23,61 @@ $error = '';
 
 // Handle Actions (Invoices & Contract Deletion)
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    if (function_exists('validate_csrf') && !validate_csrf()) {
-        $error = 'CSRF verification failed.';
-    } else {
-        $action = $_POST['action'] ?? '';
+    if (function_exists('validate_csrf')) {
+        validate_csrf();
+    }
 
-        if ($action === 'save_invoice') {
-            if (!has_permission('budsheets_edit')) {
-                die('Access Denied: Edit permission required.');
-            }
+    $action = $_POST['action'] ?? '';
 
-            $invoice_id = !empty($_POST['invoice_id']) ? (int)$_POST['invoice_id'] : null;
-            $data = [
-                'item_id'        => $itemId,
-                'invoice_number' => $_POST['invoice_number'] ?? '',
-                'amount_paid'    => $_POST['amount_paid'] ?? 0,
-                'currency'       => $_POST['currency'] ?? 'USD',
-                'period_type'    => $_POST['period_type'] ?? 'monthly',
-                'period_year'    => $_POST['period_year'] ?? date('Y'),
-                'period_month'   => $_POST['period_month'] ?? null,
-                'payment_date'   => $_POST['payment_date'] ?? null,
-                'comments'       => $_POST['comments'] ?? ''
-            ];
+    if ($action === 'save_invoice') {
+        if (!has_permission('budsheets_edit')) {
+            die('Access Denied: Edit permission required.');
+        }
 
-            $file = $_FILES['invoice_attachment'] ?? null;
-            if (budsheets_save_invoice($data, $file, $invoice_id)) {
-                $message = 'Invoice recorded successfully.';
-            } else {
-                $error = 'Failed to save invoice.';
-            }
-        } elseif ($action === 'delete_invoice') {
-            if (!has_permission('budsheets_edit')) {
-                die('Access Denied: Edit permission required.');
-            }
-            $invoice_id = (int)($_POST['invoice_id'] ?? 0);
-            if ($invoice_id) {
-                budsheets_delete_invoice($invoice_id);
-                $message = 'Invoice deleted successfully.';
-            }
-        } elseif ($action === 'delete_contract_file') {
-            if (!has_permission('budsheets_edit')) {
-                die('Access Denied: Edit permission required.');
-            }
-            $file_id = (int)($_POST['file_id'] ?? 0);
-            if ($file_id) {
-                budsheets_delete_contract_file($file_id);
-                $message = 'Contract attachment removed.';
-            }
-        } elseif ($action === 'upload_contract_files') {
-            if (!has_permission('budsheets_edit')) {
-                die('Access Denied: Edit permission required.');
-            }
-            if (!empty($_FILES['contract_files'])) {
-                budsheets_save_contract_files($itemId, $_FILES['contract_files']);
-                $message = 'Contract file(s) uploaded successfully.';
-            }
+        $invoice_id = !empty($_POST['invoice_id']) ? (int)$_POST['invoice_id'] : null;
+        $data = [
+            'item_id'        => $itemId,
+            'invoice_number' => $_POST['invoice_number'] ?? '',
+            'amount_paid'    => $_POST['amount_paid'] ?? 0,
+            'currency'       => $_POST['currency'] ?? 'USD',
+            'period_type'    => $_POST['period_type'] ?? 'monthly',
+            'period_year'    => $_POST['period_year'] ?? date('Y'),
+            'period_month'   => $_POST['period_month'] ?? null,
+            'payment_date'   => $_POST['payment_date'] ?? null,
+            'comments'       => $_POST['comments'] ?? ''
+        ];
+
+        $file = $_FILES['invoice_attachment'] ?? null;
+        if (budsheets_save_invoice($data, $file, $invoice_id)) {
+            $message = 'Invoice recorded successfully.';
+        } else {
+            $error = 'Failed to save invoice.';
+        }
+    } elseif ($action === 'delete_invoice') {
+        if (!has_permission('budsheets_edit')) {
+            die('Access Denied: Edit permission required.');
+        }
+        $invoice_id = (int)($_POST['invoice_id'] ?? 0);
+        if ($invoice_id) {
+            budsheets_delete_invoice($invoice_id);
+            $message = 'Invoice deleted successfully.';
+        }
+    } elseif ($action === 'delete_contract_file') {
+        if (!has_permission('budsheets_edit')) {
+            die('Access Denied: Edit permission required.');
+        }
+        $file_id = (int)($_POST['file_id'] ?? 0);
+        if ($file_id) {
+            budsheets_delete_contract_file($file_id);
+            $message = 'Contract attachment removed.';
+        }
+    } elseif ($action === 'upload_contract_files') {
+        if (!has_permission('budsheets_edit')) {
+            die('Access Denied: Edit permission required.');
+        }
+        if (!empty($_FILES['contract_files'])) {
+            budsheets_save_contract_files($itemId, $_FILES['contract_files']);
+            $message = 'Contract file(s) uploaded successfully.';
         }
     }
 }

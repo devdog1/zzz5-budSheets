@@ -19,46 +19,45 @@ $filterLob = isset($_GET['lob_id']) ? (int)$_GET['lob_id'] : null;
 
 // Handle Form Submissions
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    if (function_exists('validate_csrf') && !validate_csrf()) {
-        $error = 'CSRF verification failed.';
-    } else {
-        if ($action === 'save_item') {
-            if (!has_permission('budsheets_edit')) {
-                die('Access Denied: Edit permission required.');
-            }
+    if (function_exists('validate_csrf')) {
+        validate_csrf();
+    }
 
-            $itemId = !empty($_POST['item_id']) ? (int)$_POST['item_id'] : null;
-            $vendor = trim($_POST['vendor'] ?? '');
-            $product = trim($_POST['product'] ?? '');
-            $lob_id = (int)($_POST['lob_id'] ?? 0);
+    if ($action === 'save_item') {
+        if (!has_permission('budsheets_edit')) {
+            die('Access Denied: Edit permission required.');
+        }
 
-            if (!$lob_id || empty($vendor) || empty($product)) {
-                $error = 'Line of Business, Vendor, and Product are required fields.';
-            } else {
-                $savedId = budsheets_save_item($_POST, $itemId);
+        $itemId = !empty($_POST['item_id']) ? (int)$_POST['item_id'] : null;
+        $vendor = trim($_POST['vendor'] ?? '');
+        $product = trim($_POST['product'] ?? '');
+        $lob_id = (int)($_POST['lob_id'] ?? 0);
 
-                if ($savedId) {
-                    // Process file attachments if any
-                    if (!empty($_FILES['contract_files'])) {
-                        budsheets_save_contract_files($savedId, $_FILES['contract_files']);
-                    }
-                    set_flash_message('success', 'Budget item saved successfully.');
-                    redirect(url_for('budsheets_item_detail') . '&id=' . $savedId);
-                } else {
-                    $error = 'Failed to save budget item.';
+        if (!$lob_id || empty($vendor) || empty($product)) {
+            $error = 'Line of Business, Vendor, and Product are required fields.';
+        } else {
+            $savedId = budsheets_save_item($_POST, $itemId);
+
+            if ($savedId) {
+                if (!empty($_FILES['contract_files'])) {
+                    budsheets_save_contract_files($savedId, $_FILES['contract_files']);
                 }
+                set_flash_message('success', 'Budget item saved successfully.');
+                redirect(url_for('budsheets_item_detail') . '&id=' . $savedId);
+            } else {
+                $error = 'Failed to save budget item.';
             }
-        } elseif ($action === 'delete_item') {
-            if (!has_permission('budsheets_edit')) {
-                die('Access Denied: Edit permission required.');
-            }
+        }
+    } elseif ($action === 'delete_item') {
+        if (!has_permission('budsheets_edit')) {
+            die('Access Denied: Edit permission required.');
+        }
 
-            $itemId = (int)($_POST['item_id'] ?? 0);
-            if ($itemId) {
-                budsheets_delete_item($itemId);
-                set_flash_message('success', 'Budget item deleted successfully.');
-                redirect(url_for('budsheets_items'));
-            }
+        $itemId = (int)($_POST['item_id'] ?? 0);
+        if ($itemId) {
+            budsheets_delete_item($itemId);
+            set_flash_message('success', 'Budget item deleted successfully.');
+            redirect(url_for('budsheets_items'));
         }
     }
 }
