@@ -178,19 +178,30 @@ $fullMonthsNames = [
                 <div class="card-body">
                     <div class="row g-3">
                         <div class="col-md-4">
-                            <div class="small text-muted">Entered Recurring Cost</div>
-                            <div class="fs-5 fw-bold text-dark">$<?= number_format((float)$item['monthly_cost'], 2) ?> <small><?= e($item['currency']) ?></small></div>
-                            <div class="small text-muted">
-                                (<?= ucfirst(e($item['billing_frequency'] ?? 'monthly')) ?>)
-                                <?php if (($item['billing_frequency'] ?? '') === 'yearly' && !empty($item['invoice_month'])): ?>
-                                    - Invoice Month: <strong><?= $fullMonthsNames[(int)$item['invoice_month']] ?? '' ?></strong>
-                                <?php endif; ?>
-                            </div>
+                            <div class="small text-muted">Entered / FY Base Cost</div>
+                            <?php if ($fyCalc['has_custom_schedule']): ?>
+                                <div class="fs-5 fw-bold text-dark">$<?= number_format($fyCalc['annual_base'], 2) ?> <small><?= e($item['currency']) ?> / yr</small></div>
+                                <div class="small text-primary fw-semibold">
+                                    <i class="fa-solid fa-calendar-check me-1"></i>FY<?= $selectedFy ?> Custom Schedule
+                                    <br>(Monthly Avg Base: $<?= number_format($fyCalc['monthly_base'], 2) ?>)
+                                </div>
+                            <?php else: ?>
+                                <div class="fs-5 fw-bold text-dark">$<?= number_format((float)$item['monthly_cost'], 2) ?> <small><?= e($item['currency']) ?></small></div>
+                                <div class="small text-muted">
+                                    (<?= ucfirst(e($item['billing_frequency'] ?? 'monthly')) ?>)
+                                    <?php if (($item['billing_frequency'] ?? '') === 'yearly' && !empty($item['invoice_month'])): ?>
+                                        - Invoice Month: <strong><?= $fullMonthsNames[(int)$item['invoice_month']] ?? '' ?></strong>
+                                    <?php endif; ?>
+                                </div>
+                            <?php endif; ?>
                         </div>
 
                         <div class="col-md-4">
                             <div class="small text-muted">Monthly Avg w/ Tax (CAD)</div>
                             <div class="fs-5 fw-bold text-primary">$<?= number_format($monthlyCad, 2) ?> CAD</div>
+                            <?php if ($fyCalc['has_custom_schedule']): ?>
+                                <div class="small text-muted">(Calculated from FY<?= $selectedFy ?> schedule)</div>
+                            <?php endif; ?>
                         </div>
 
                         <div class="col-md-4">
@@ -316,7 +327,7 @@ $fullMonthsNames = [
         <div class="card-header bg-white py-3 d-flex justify-content-between align-items-center">
             <div>
                 <h5 class="fw-bold mb-0 text-dark"><i class="fa-solid fa-calendar-week me-2 text-primary"></i>Monthly Budget Breakdown for Fiscal Year FY<?= $selectedFy ?></h5>
-                <span class="small text-muted">Customize variable monthly dollar amounts for this specific fiscal year</span>
+                <span class="small text-muted">Customize variable pre-tax monthly dollar amounts for this specific fiscal year</span>
             </div>
             <?php if (has_permission('budsheets_edit')): ?>
                 <button type="button" class="btn btn-sm btn-outline-primary" data-bs-toggle="modal" data-bs-target="#monthlyScheduleModal">
@@ -330,13 +341,15 @@ $fullMonthsNames = [
                 $defaultMonthlyBase = ($item['billing_frequency'] === 'yearly') ? ((float)$item['monthly_cost'] / 12.0) : (float)$item['monthly_cost'];
                 foreach ($fyMonthsOrder as $mNum):
                     $mAmount = isset($existingSchedule[$mNum]) ? $existingSchedule[$mNum] : $defaultMonthlyBase;
-                    $mCad = budsheets_convert_to_cad($mAmount, $item['currency']);
+                    $mTax = budsheets_calculate_tax($mAmount, $item['tax_type'], 'monthly');
+                    $mCadTotal = budsheets_convert_to_cad($mTax['total'], $item['currency']);
                 ?>
                     <div class="col-6 col-sm-4 col-md-2 mb-2">
                         <div class="p-2 border rounded bg-light">
                             <div class="fw-bold text-secondary small"><?= $monthsNames[$mNum] ?></div>
                             <div class="fs-6 fw-bold text-dark">$<?= number_format($mAmount, 2) ?> <small class="text-muted"><?= e($item['currency']) ?></small></div>
-                            <div class="small text-success fw-semibold">$<?= number_format($mCad, 2) ?> CAD</div>
+                            <div class="small text-muted">(Pre-Tax)</div>
+                            <div class="small text-success fw-semibold">$<?= number_format($mCadTotal, 2) ?> CAD <small class="text-muted">(w/ Tax)</small></div>
                         </div>
                     </div>
                 <?php endforeach; ?>
@@ -604,13 +617,13 @@ $fullMonthsNames = [
                     <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
                 </div>
                 <div class="modal-body">
-                    <p class="small text-muted mb-3">Specify exact dollar amounts (in <strong><?= e($item['currency']) ?></strong>) for each month of Fiscal Year FY<?= $selectedFy ?>.</p>
+                    <p class="small text-muted mb-3">Specify exact <strong>pre-tax</strong> dollar amounts (in <strong><?= e($item['currency']) ?></strong>) for each month of Fiscal Year FY<?= $selectedFy ?>.</p>
                     <div class="row g-3">
                         <?php foreach ($fyMonthsOrder as $mNum):
                             $val = isset($existingSchedule[$mNum]) ? $existingSchedule[$mNum] : $defaultMonthlyBase;
                         ?>
                             <div class="col-md-3">
-                                <label class="form-label small fw-semibold mb-1"><?= $monthsNames[$mNum] ?></label>
+                                <label class="form-label small fw-semibold mb-1"><?= $monthsNames[$mNum] ?> (Pre-Tax)</label>
                                 <div class="input-group input-group-sm">
                                     <span class="input-group-text">$</span>
                                     <input type="number" step="0.01" name="monthly_amounts[<?= $mNum ?>]" class="form-control" value="<?= number_format($val, 2, '.', '') ?>" required>

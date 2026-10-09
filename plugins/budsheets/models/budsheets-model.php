@@ -373,11 +373,13 @@ function budsheets_calculate_item_fy_cost($item, $fiscal_year = null) {
 
         $calc = budsheets_calculate_item_cost_and_tax($annualBase, 'yearly', $item['tax_type']);
         $calc['monthly_schedule'] = $sched;
+        $calc['has_custom_schedule'] = true;
         return $calc;
     }
 
     $calc = budsheets_calculate_item_cost_and_tax((float)$item['monthly_cost'], $item['billing_frequency'] ?? 'monthly', $item['tax_type']);
     $calc['monthly_schedule'] = [];
+    $calc['has_custom_schedule'] = false;
     return $calc;
 }
 
