@@ -137,6 +137,17 @@ $pdb->query("CREATE TABLE plug_budsheets_items (
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );");
 
+$pdb->query("CREATE TABLE plug_budsheets_item_monthly_schedules (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    item_id INTEGER NOT NULL,
+    fiscal_year INTEGER NOT NULL,
+    month INTEGER NOT NULL,
+    amount REAL DEFAULT 0.00,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE (item_id, fiscal_year, month)
+);");
+
 $pdb->query("CREATE TABLE plug_budsheets_contract_files (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     item_id INTEGER NOT NULL,
@@ -198,15 +209,27 @@ $updatedUsers = budsheets_get_lob_users(1);
 assert(count($updatedUsers) === 1 && $updatedUsers[0] == 10, 'IT LOB updated user assignment');
 echo "  ✓ LOB CRUD & User assignment tests passed.\n";
 
-// Test 2: Tax & Currency Conversion Settings
-echo "[TEST] Testing tax and currency conversion logic...\n";
+// Test 2: Tax, Currency Conversion & Fiscal Year Settings
+echo "[TEST] Testing tax, currency conversion & fiscal year determination logic...\n";
 budsheets_save_settings([
     'gst_rate' => '5.0',
     'pst_rate' => '7.0',
     'rate_USD' => '1.35',
     'rate_EUR' => '1.45',
-    'rate_CAD' => '1.0'
+    'rate_CAD' => '1.0',
+    'fiscal_year_start_month' => '9',
+    'fiscal_year_start_day'   => '1'
 ]);
+
+// Sept 1, 2025 to Aug 31, 2026 includes Jan 1, 2026 -> FY2026
+$fy1 = budsheets_get_fiscal_year('2025-09-01');
+assert($fy1 === 2026, 'Sept 1, 2025 is FY2026 (Jan 1, 2026 falls into this period)');
+
+$fy2 = budsheets_get_fiscal_year('2026-08-31');
+assert($fy2 === 2026, 'Aug 31, 2026 is FY2026');
+
+$fy3 = budsheets_get_fiscal_year('2026-09-01');
+assert($fy3 === 2027, 'Sept 1, 2026 is FY2027');
 
 $taxCalc = budsheets_calculate_tax(100.00, 'GSTandPST');
 assert($taxCalc['gst'] == 5.0, 'GST amount is $5.00');
@@ -215,7 +238,7 @@ assert($taxCalc['total'] == 112.00, 'Total with GST+PST is $112.00');
 
 $convertedCad = budsheets_convert_to_cad(100.00, 'USD');
 assert($convertedCad == 135.00, '$100 USD converts to $135.00 CAD at 1.35 rate');
-echo "  ✓ Tax and Currency conversion tests passed.\n";
+echo "  ✓ Tax, Currency conversion & Fiscal Year tests passed.\n";
 
 // Test 3: Expense Classes CRUD & LOB Assignment
 echo "[TEST] Testing Expense Classes operations & LOB associations...\n";
@@ -241,8 +264,8 @@ assert(budsheets_is_allowed_extension('script.phtml') === false, 'phtml extensio
 assert(budsheets_is_allowed_extension('malware.exe') === false, 'exe extension blocked');
 echo "  ✓ File extension security check tests passed.\n";
 
-// Test 5: Budget Item CRUD, Systems Directory Link & Yearly Billing Frequency
-echo "[TEST] Testing Budget Item operations, Systems Directory Link, and Billing Frequency...\n";
+// Test 5: Budget Item CRUD & FY Monthly Budget Schedules
+echo "[TEST] Testing Budget Item CRUD and FY Monthly Budget Schedules...\n";
 $itemData = [
     'lob_id'                => 1,
     'vendor'                => 'Microsoft',
@@ -264,15 +287,21 @@ $itemData = [
 $itemId = budsheets_save_item($itemData);
 assert($itemId > 0, 'Item should be saved and return valid ID');
 
-$item = budsheets_get_item($itemId);
-assert($item['vendor'] === 'Microsoft', 'Vendor is Microsoft');
-assert($item['monthly_cost'] == 12000.00, 'Cost matches');
-assert($item['billing_frequency'] === 'yearly', 'Billing frequency is yearly');
+// Save custom monthly schedule for FY2026
+$monthlyBreakdown = [
+    9 => 1000, 10 => 1000, 11 => 1000, 12 => 1000,
+    1 => 1500, 2 => 1500, 3 => 1500, 4 => 1500,
+    5 => 500, 6 => 500, 7 => 500, 8 => 500
+];
+budsheets_save_item_monthly_schedule($itemId, 2026, $monthlyBreakdown);
 
-$itemCostCalc = budsheets_calculate_item_cost_and_tax((float)$item['monthly_cost'], $item['billing_frequency'], $item['tax_type']);
-assert($itemCostCalc['monthly_base'] == 1000.00, 'Monthly base calculated from $12,000 yearly is $1,000');
-assert($itemCostCalc['annual_base'] == 12000.00, 'Annual base is $12,000');
-echo "  ✓ Budget Item CRUD, Systems Directory Link, and Yearly Billing Frequency tests passed.\n";
+$savedSched = budsheets_get_item_monthly_schedule($itemId, 2026);
+assert(count($savedSched) === 12, '12 months in saved schedule');
+assert($savedSched[1] == 1500, 'Jan amount is 1500');
+
+$fyCostCalc = budsheets_calculate_item_fy_cost(budsheets_get_item($itemId), 2026);
+assert($fyCostCalc['annual_base'] == 12000.00, 'FY2026 annual schedule total base is $12,000');
+echo "  ✓ Budget Item CRUD and FY Monthly Schedule tests passed.\n";
 
 // Test 6: Invoices CRUD & CAD Conversion Summary
 echo "[TEST] Testing Invoices operations and CAD summary totals...\n";

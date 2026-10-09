@@ -21,7 +21,10 @@ if (!$item) {
 $message = '';
 $error = '';
 
-// Handle Actions (Invoices & Contract Deletion)
+$currentFy = budsheets_get_fiscal_year();
+$selectedFy = isset($_GET['fy']) ? (int)$_GET['fy'] : $currentFy;
+
+// Handle Actions (Invoices, Contract Deletion, Monthly Budget Schedule)
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if (function_exists('validate_csrf')) {
         validate_csrf();
@@ -29,7 +32,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     $action = $_POST['action'] ?? '';
 
-    if ($action === 'save_invoice') {
+    if ($action === 'save_monthly_schedule') {
+        if (!has_permission('budsheets_edit')) {
+            die('Access Denied: Edit permission required.');
+        }
+
+        $fyTarget = (int)($_POST['fiscal_year'] ?? $selectedFy);
+        $monthlyAmounts = $_POST['monthly_amounts'] ?? [];
+
+        if (budsheets_save_item_monthly_schedule($itemId, $fyTarget, $monthlyAmounts)) {
+            $message = "Monthly budget breakdown for FY{$fyTarget} updated successfully.";
+        } else {
+            $error = "Failed to update monthly budget breakdown.";
+        }
+    } elseif ($action === 'save_invoice') {
         if (!has_permission('budsheets_edit')) {
             die('Access Denied: Edit permission required.');
         }
@@ -85,14 +101,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 $contracts = budsheets_get_contract_files($itemId);
 $invoices = budsheets_get_invoices($itemId);
 
-$costCalc = budsheets_calculate_item_cost_and_tax((float)$item['monthly_cost'], $item['billing_frequency'] ?? 'monthly', $item['tax_type']);
-$monthlyCad = budsheets_convert_to_cad($costCalc['monthly_total'], $item['currency']);
-$annualCad = budsheets_convert_to_cad($costCalc['annual_total'], $item['currency']);
+$fyCalc = budsheets_calculate_item_fy_cost($item, $selectedFy);
+$monthlyCad = budsheets_convert_to_cad($fyCalc['monthly_total'], $item['currency']);
+$annualCad = budsheets_convert_to_cad($fyCalc['annual_total'], $item['currency']);
 
 $totalInvoicedCad = 0.0;
 foreach ($invoices as $inv) {
     $totalInvoicedCad += budsheets_convert_to_cad($inv['amount_paid'], $inv['currency']);
 }
+
+$existingSchedule = budsheets_get_item_monthly_schedule($itemId, $selectedFy);
+$fyMonthsOrder = budsheets_get_fiscal_year_months();
+
+$monthsNames = [
+    1 => 'Jan', 2 => 'Feb', 3 => 'Mar', 4 => 'Apr',
+    5 => 'May', 6 => 'Jun', 7 => 'Jul', 8 => 'Aug',
+    9 => 'Sep', 10 => 'Oct', 11 => 'Nov', 12 => 'Dec'
+];
 ?>
 
 <div class="container-fluid py-4">
@@ -133,8 +158,16 @@ foreach ($invoices as $inv) {
         <!-- Item Overview Details -->
         <div class="col-lg-8">
             <div class="card border-0 shadow-sm h-100">
-                <div class="card-header bg-white py-3">
+                <div class="card-header bg-white py-3 d-flex justify-content-between align-items-center">
                     <h5 class="fw-bold mb-0 text-dark"><i class="fa-solid fa-circle-info me-2 text-primary"></i>Item Specifications & Cost Breakdown (CAD)</h5>
+                    <div class="d-flex align-items-center">
+                        <label class="me-2 small fw-semibold mb-0">Fiscal Year:</label>
+                        <select class="form-select form-select-sm" onchange="location.href='<?= url_for('budsheets_item_detail') ?>&id=<?= $itemId ?>&fy=' + this.value;">
+                            <?php for ($y = $currentFy - 3; $y <= $currentFy + 3; $y++): ?>
+                                <option value="<?= $y ?>" <?= $y === $selectedFy ? 'selected' : '' ?>>FY<?= $y ?></option>
+                            <?php endfor; ?>
+                        </select>
+                    </div>
                 </div>
                 <div class="card-body">
                     <div class="row g-3">
@@ -145,12 +178,12 @@ foreach ($invoices as $inv) {
                         </div>
 
                         <div class="col-md-4">
-                            <div class="small text-muted">Monthly Total w/ Tax (CAD)</div>
+                            <div class="small text-muted">Monthly Avg w/ Tax (CAD)</div>
                             <div class="fs-5 fw-bold text-primary">$<?= number_format($monthlyCad, 2) ?> CAD</div>
                         </div>
 
                         <div class="col-md-4">
-                            <div class="small text-muted">Full Year Annual Total (CAD)</div>
+                            <div class="small text-muted">FY<?= $selectedFy ?> Annual Total w/ Tax (CAD)</div>
                             <div class="fs-5 fw-bold text-success">$<?= number_format($annualCad, 2) ?> CAD</div>
                         </div>
 
@@ -160,7 +193,7 @@ foreach ($invoices as $inv) {
                                 <span class="badge bg-info-subtle text-info-emphasis me-1"><?= e($item['tax_type']) ?></span>
                             </div>
                             <div class="small text-muted">
-                                GST: $<?= number_format($costCalc['monthly_gst'], 2) ?>/mo | PST: $<?= number_format($costCalc['monthly_pst'], 2) ?>/mo
+                                GST: $<?= number_format($fyCalc['annual_gst'], 2) ?>/yr | PST: $<?= number_format($fyCalc['annual_pst'], 2) ?>/yr
                             </div>
                         </div>
 
@@ -263,6 +296,39 @@ foreach ($invoices as $inv) {
                         </ul>
                     <?php endif; ?>
                 </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Monthly Budget Schedule per Fiscal Year -->
+    <div class="card border-0 shadow-sm mb-4">
+        <div class="card-header bg-white py-3 d-flex justify-content-between align-items-center">
+            <div>
+                <h5 class="fw-bold mb-0 text-dark"><i class="fa-solid fa-calendar-week me-2 text-primary"></i>Monthly Budget Breakdown for Fiscal Year FY<?= $selectedFy ?></h5>
+                <span class="small text-muted">Customize variable monthly dollar amounts for this specific fiscal year</span>
+            </div>
+            <?php if (has_permission('budsheets_edit')): ?>
+                <button type="button" class="btn btn-sm btn-outline-primary" data-bs-toggle="modal" data-bs-target="#monthlyScheduleModal">
+                    <i class="fa-solid fa-pen-to-square me-1"></i> Edit FY<?= $selectedFy ?> Schedule
+                </button>
+            <?php endif; ?>
+        </div>
+        <div class="card-body">
+            <div class="row text-center g-2">
+                <?php
+                $defaultMonthlyBase = ($item['billing_frequency'] === 'yearly') ? ((float)$item['monthly_cost'] / 12.0) : (float)$item['monthly_cost'];
+                foreach ($fyMonthsOrder as $mNum):
+                    $mAmount = isset($existingSchedule[$mNum]) ? $existingSchedule[$mNum] : $defaultMonthlyBase;
+                    $mCad = budsheets_convert_to_cad($mAmount, $item['currency']);
+                ?>
+                    <div class="col-6 col-sm-4 col-md-2 mb-2">
+                        <div class="p-2 border rounded bg-light">
+                            <div class="fw-bold text-secondary small"><?= $monthsNames[$mNum] ?></div>
+                            <div class="fs-6 fw-bold text-dark">$<?= number_format($mAmount, 2) ?> <small class="text-muted"><?= e($item['currency']) ?></small></div>
+                            <div class="small text-success fw-semibold">$<?= number_format($mCad, 2) ?> CAD</div>
+                        </div>
+                    </div>
+                <?php endforeach; ?>
             </div>
         </div>
     </div>
@@ -434,77 +500,37 @@ foreach ($invoices as $inv) {
     </div>
 </div>
 
-<!-- Add Invoice Modal -->
-<div class="modal fade" id="addInvoiceModal" tabindex="-1">
-    <div class="modal-dialog">
+<!-- Edit FY Monthly Schedule Modal -->
+<div class="modal fade" id="monthlyScheduleModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
         <div class="modal-content">
-            <form method="POST" enctype="multipart/form-data">
+            <form method="POST">
                 <?php if (function_exists('csrf_field')) echo csrf_field(); ?>
-                <input type="hidden" name="action" value="save_invoice">
+                <input type="hidden" name="action" value="save_monthly_schedule">
+                <input type="hidden" name="fiscal_year" value="<?= $selectedFy ?>">
                 <div class="modal-header">
-                    <h5 class="modal-title fw-bold"><i class="fa-solid fa-receipt me-2"></i>Record New Invoice</h5>
+                    <h5 class="modal-title fw-bold"><i class="fa-solid fa-calendar-week me-2"></i>Edit FY<?= $selectedFy ?> Monthly Budget Breakdown</h5>
                     <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
                 </div>
                 <div class="modal-body">
-                    <div class="mb-3">
-                        <label class="form-label fw-semibold">Invoice Number</label>
-                        <input type="text" name="invoice_number" class="form-control" placeholder="e.g. INV-2026-001">
-                    </div>
-                    <div class="row g-2 mb-3">
-                        <div class="col-8">
-                            <label class="form-label fw-semibold">Amount Paid <span class="text-danger">*</span></label>
-                            <input type="number" step="0.01" name="amount_paid" class="form-control" placeholder="0.00" required>
-                        </div>
-                        <div class="col-4">
-                            <label class="form-label fw-semibold">Currency</label>
-                            <select name="currency" class="form-select">
-                                <?php foreach (['USD', 'CAD', 'EUR', 'GBP', 'AUD'] as $curr): ?>
-                                    <option value="<?= $curr ?>" <?= $item['currency'] === $curr ? 'selected' : '' ?>><?= $curr ?></option>
-                                <?php endforeach; ?>
-                            </select>
-                        </div>
-                    </div>
-                    <div class="row g-2 mb-3">
-                        <div class="col-6">
-                            <label class="form-label fw-semibold">Period Type</label>
-                            <select name="period_type" class="form-select">
-                                <option value="monthly">Monthly</option>
-                                <option value="full_year">Full Year</option>
-                            </select>
-                        </div>
-                        <div class="col-3">
-                            <label class="form-label fw-semibold">Year</label>
-                            <select name="period_year" class="form-select">
-                                <?php for ($y = date('Y') - 5; $y <= date('Y') + 5; $y++): ?>
-                                    <option value="<?= $y ?>" <?= date('Y') == $y ? 'selected' : '' ?>><?= $y ?></option>
-                                <?php endfor; ?>
-                            </select>
-                        </div>
-                        <div class="col-3">
-                            <label class="form-label fw-semibold">Month</label>
-                            <select name="period_month" class="form-select">
-                                <?php for ($m = 1; $m <= 12; $m++): ?>
-                                    <option value="<?= $m ?>" <?= date('n') == $m ? 'selected' : '' ?>><?= date('M', mktime(0, 0, 0, $m, 10)) ?></option>
-                                <?php endfor; ?>
-                            </select>
-                        </div>
-                    </div>
-                    <div class="mb-3">
-                        <label class="form-label fw-semibold">Payment Date</label>
-                        <input type="date" name="payment_date" class="form-control" value="<?= date('Y-m-d') ?>">
-                    </div>
-                    <div class="mb-3">
-                        <label class="form-label fw-semibold">Comments / Notes</label>
-                        <textarea name="comments" class="form-control" rows="2" placeholder="Payment reference or comments..."></textarea>
-                    </div>
-                    <div class="mb-3">
-                        <label class="form-label fw-semibold">Upload Invoice Attachment</label>
-                        <input type="file" name="invoice_attachment" class="form-control">
+                    <p class="small text-muted mb-3">Specify exact dollar amounts (in <strong><?= e($item['currency']) ?></strong>) for each month of Fiscal Year FY<?= $selectedFy ?>.</p>
+                    <div class="row g-3">
+                        <?php foreach ($fyMonthsOrder as $mNum):
+                            $val = isset($existingSchedule[$mNum]) ? $existingSchedule[$mNum] : $defaultMonthlyBase;
+                        ?>
+                            <div class="col-md-3">
+                                <label class="form-label small fw-semibold mb-1"><?= $monthsNames[$mNum] ?></label>
+                                <div class="input-group input-group-sm">
+                                    <span class="input-group-text">$</span>
+                                    <input type="number" step="0.01" name="monthly_amounts[<?= $mNum ?>]" class="form-control" value="<?= number_format($val, 2, '.', '') ?>" required>
+                                </div>
+                            </div>
+                        <?php endforeach; ?>
                     </div>
                 </div>
                 <div class="modal-footer">
                     <button type="button" class="btn btn-light" data-bs-dismiss="modal">Cancel</button>
-                    <button type="submit" class="btn btn-primary">Save Invoice</button>
+                    <button type="submit" class="btn btn-primary">Save FY<?= $selectedFy ?> Schedule</button>
                 </div>
             </form>
         </div>

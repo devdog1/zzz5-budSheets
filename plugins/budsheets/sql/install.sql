@@ -50,6 +50,18 @@ CREATE TABLE IF NOT EXISTS `plug_budsheets_items` (
     CONSTRAINT `fk_budsheets_items_lob` FOREIGN KEY (`lob_id`) REFERENCES `plug_budsheets_lines_of_business`(`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
+CREATE TABLE IF NOT EXISTS `plug_budsheets_item_monthly_schedules` (
+    `id` INT AUTO_INCREMENT PRIMARY KEY,
+    `item_id` INT NOT NULL,
+    `fiscal_year` INT NOT NULL,
+    `month` INT NOT NULL,
+    `amount` DECIMAL(15,2) NOT NULL DEFAULT 0.00,
+    `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP,
+    `updated_at` DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE KEY `uk_budsheets_item_fy_month` (`item_id`, `fiscal_year`, `month`),
+    CONSTRAINT `fk_budsheets_schedules_item` FOREIGN KEY (`item_id`) REFERENCES `plug_budsheets_items`(`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
 CREATE TABLE IF NOT EXISTS `plug_budsheets_contract_files` (
     `id` INT AUTO_INCREMENT PRIMARY KEY,
     `item_id` INT NOT NULL,

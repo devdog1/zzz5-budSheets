@@ -64,6 +64,30 @@ function budsheets_ensure_tables_exist($pdb) {
             // Ignore
         }
     }
+
+    // Auto-create item_monthly_schedules table if missing
+    try {
+        $schedTable = $pdb->getTableName('item_monthly_schedules');
+        $pdb->query("SELECT 1 FROM {$schedTable} LIMIT 1");
+    } catch (Exception $e) {
+        try {
+            $schedTable = $pdb->getTableName('item_monthly_schedules');
+            $itemsTable = $pdb->getTableName('items');
+            $pdb->query("CREATE TABLE IF NOT EXISTS {$schedTable} (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                item_id INT NOT NULL,
+                fiscal_year INT NOT NULL,
+                month INT NOT NULL,
+                amount DECIMAL(15,2) NOT NULL DEFAULT 0.00,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                UNIQUE KEY uk_budsheets_item_fy_month (item_id, fiscal_year, month),
+                CONSTRAINT fk_budsheets_schedules_item FOREIGN KEY (item_id) REFERENCES {$itemsTable}(id) ON DELETE CASCADE
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;");
+        } catch (Exception $ex) {
+            // Ignore
+        }
+    }
 }
 
 /**
@@ -116,24 +140,27 @@ function budsheets_is_allowed_extension($filename) {
 }
 
 // ==========================================
-// Tax & Currency Exchange Settings Operations
+// Tax, Currency Exchange & Fiscal Year Settings
 // ==========================================
 
 function budsheets_get_settings() {
     $defaultSettings = [
-        'gst_rate' => 5.0,
-        'pst_rate' => 7.0,
-        'rate_CAD' => 1.0,
-        'rate_USD' => 1.35,
-        'rate_EUR' => 1.45,
-        'rate_GBP' => 1.70,
-        'rate_AUD' => 0.90
+        'gst_rate'                 => 5.0,
+        'pst_rate'                 => 7.0,
+        'rate_CAD'                 => 1.0,
+        'rate_USD'                 => 1.35,
+        'rate_EUR'                 => 1.45,
+        'rate_GBP'                 => 1.70,
+        'rate_AUD'                 => 0.90,
+        'fiscal_year_start_month'  => 9, // Default Sept 1st
+        'fiscal_year_start_day'    => 1
     ];
 
     $settings = [];
     foreach ($defaultSettings as $key => $default) {
         if (function_exists('get_plugin_setting')) {
-            $settings[$key] = (float)get_plugin_setting('budsheets', $key, $default);
+            $val = get_plugin_setting('budsheets', $key, $default);
+            $settings[$key] = is_numeric($val) ? (float)$val : $val;
         } else {
             $settings[$key] = $default;
         }
@@ -144,13 +171,61 @@ function budsheets_get_settings() {
 function budsheets_save_settings($data) {
     if (!function_exists('set_plugin_setting')) return false;
 
-    $fields = ['gst_rate', 'pst_rate', 'rate_CAD', 'rate_USD', 'rate_EUR', 'rate_GBP', 'rate_AUD'];
+    $fields = [
+        'gst_rate', 'pst_rate', 'rate_CAD', 'rate_USD', 'rate_EUR', 'rate_GBP', 'rate_AUD',
+        'fiscal_year_start_month', 'fiscal_year_start_day'
+    ];
     foreach ($fields as $f) {
         if (isset($data[$f])) {
             set_plugin_setting('budsheets', $f, (float)$data[$f]);
         }
     }
     return true;
+}
+
+/**
+ * Get current active fiscal year number for a given date or timestamp.
+ * Rule: The fiscal year is named after the year number that Jan 1st falls into for that period.
+ */
+function budsheets_get_fiscal_year($dateStr = null) {
+    $settings = budsheets_get_settings();
+    $fyStartMonth = (int)($settings['fiscal_year_start_month'] ?? 9);
+    $fyStartDay = (int)($settings['fiscal_year_start_day'] ?? 1);
+
+    $timestamp = $dateStr ? strtotime($dateStr) : time();
+    $year = (int)date('Y', $timestamp);
+    $month = (int)date('n', $timestamp);
+    $day = (int)date('j', $timestamp);
+
+    if ($fyStartMonth === 1 && $fyStartDay === 1) {
+        return $year;
+    }
+
+    // Check if current date is on or after fiscal year start
+    $isAfterStart = ($month > $fyStartMonth) || ($month === $fyStartMonth && $day >= $fyStartDay);
+
+    // Jan 1st falls into the period that starts in previous year if fyStartMonth > 1
+    // Example: Sept 1, 2025 to Aug 31, 2026 includes Jan 1, 2026 -> Fiscal Year 2026
+    if ($isAfterStart) {
+        return $year + 1;
+    } else {
+        return $year;
+    }
+}
+
+/**
+ * Returns the 12 month numbers (in chronological order) for a given Fiscal Year
+ */
+function budsheets_get_fiscal_year_months() {
+    $settings = budsheets_get_settings();
+    $startMonth = (int)($settings['fiscal_year_start_month'] ?? 9);
+
+    $months = [];
+    for ($i = 0; $i < 12; $i++) {
+        $m = (($startMonth - 1 + $i) % 12) + 1;
+        $months[] = $m;
+    }
+    return $months;
 }
 
 /**
@@ -221,6 +296,81 @@ function budsheets_calculate_tax($amount, $taxType, $billingFrequency = 'monthly
         'pst'   => $calc['monthly_pst'],
         'total' => $calc['monthly_total']
     ];
+}
+
+// ==========================================
+// Monthly Budget Schedule Operations per Item & FY
+// ==========================================
+
+function budsheets_get_item_monthly_schedule($item_id, $fiscal_year) {
+    $pdb = budsheets_db();
+    if (!$pdb) return [];
+
+    $table = $pdb->getTableName('item_monthly_schedules');
+    $rows = $pdb->query("SELECT month, amount FROM {$table} WHERE item_id = ? AND fiscal_year = ?", [
+        (int)$item_id,
+        (int)$fiscal_year
+    ])->fetchAll();
+
+    $schedule = [];
+    foreach ($rows as $r) {
+        $schedule[(int)$r['month']] = (float)$r['amount'];
+    }
+    return $schedule;
+}
+
+function budsheets_save_item_monthly_schedule($item_id, $fiscal_year, $monthly_amounts) {
+    $item = budsheets_get_item($item_id);
+    if (!$item) {
+        die('Access Denied: Target item not found or access restricted.');
+    }
+
+    $pdb = budsheets_db();
+    if (!$pdb) return false;
+
+    $table = $pdb->getTableName('item_monthly_schedules');
+
+    for ($m = 1; $m <= 12; $m++) {
+        $amt = isset($monthly_amounts[$m]) ? (float)$monthly_amounts[$m] : 0.0;
+
+        $existing = $pdb->query("SELECT id FROM {$table} WHERE item_id = ? AND fiscal_year = ? AND month = ?", [
+            (int)$item_id, (int)$fiscal_year, $m
+        ])->fetch();
+
+        if ($existing) {
+            $pdb->query("UPDATE {$table} SET amount = ? WHERE id = ?", [$amt, (int)$existing['id']]);
+        } else {
+            $pdb->query("INSERT INTO {$table} (item_id, fiscal_year, month, amount) VALUES (?, ?, ?, ?)", [
+                (int)$item_id, (int)$fiscal_year, $m, $amt
+            ]);
+        }
+    }
+    return true;
+}
+
+/**
+ * Calculates item cost and tax for a specific fiscal year taking monthly schedule into account
+ */
+function budsheets_calculate_item_fy_cost($item, $fiscal_year = null) {
+    if (!$fiscal_year) {
+        $fiscal_year = budsheets_get_fiscal_year();
+    }
+
+    $sched = budsheets_get_item_monthly_schedule($item['id'], $fiscal_year);
+
+    // If custom schedule exists and has non-zero amounts, aggregate from schedule
+    if (!empty($sched)) {
+        $annualBase = array_sum($sched);
+
+        $calc = budsheets_calculate_item_cost_and_tax($annualBase, 'yearly', $item['tax_type']);
+        $calc['monthly_schedule'] = $sched;
+        return $calc;
+    }
+
+    // Default: calculate from standard recurring item cost
+    $calc = budsheets_calculate_item_cost_and_tax((float)$item['monthly_cost'], $item['billing_frequency'] ?? 'monthly', $item['tax_type']);
+    $calc['monthly_schedule'] = [];
+    return $calc;
 }
 
 // ==========================================
@@ -788,10 +938,14 @@ function budsheets_get_dashboard_summary() {
         }
     }
 
+    $fy = budsheets_get_fiscal_year();
     $monthlyCostCad = 0.0;
+    $annualCostCad = 0.0;
+
     foreach ($items as $item) {
-        $mTax = budsheets_calculate_item_cost_and_tax((float)$item['monthly_cost'], $item['billing_frequency'] ?? 'monthly', $item['tax_type']);
-        $monthlyCostCad += budsheets_convert_to_cad($mTax['monthly_total'], $item['currency']);
+        $fyCalc = budsheets_calculate_item_fy_cost($item, $fy);
+        $monthlyCostCad += budsheets_convert_to_cad($fyCalc['monthly_total'], $item['currency']);
+        $annualCostCad += budsheets_convert_to_cad($fyCalc['annual_total'], $item['currency']);
     }
 
     return [
@@ -799,7 +953,7 @@ function budsheets_get_dashboard_summary() {
         'item_count' => $itemCount,
         'total_invoiced_cad' => $totalInvoicedCad,
         'monthly_cost_cad' => $monthlyCostCad,
-        'annual_cost_cad' => $monthlyCostCad * 12
+        'annual_cost_cad' => $annualCostCad
     ];
 }
 
@@ -877,9 +1031,10 @@ function budsheets_handle_file_download() {
 function budsheets_export_items_csv() {
     $lob_id = isset($_GET['lob_id']) ? (int)$_GET['lob_id'] : null;
     $items = budsheets_get_items($lob_id);
+    $fy = budsheets_get_fiscal_year();
 
     header('Content-Type: text/csv; charset=utf-8');
-    header('Content-Disposition: attachment; filename=operational_budget_items_' . date('Y-m-d') . '.csv');
+    header('Content-Disposition: attachment; filename=operational_budget_items_FY' . $fy . '_' . date('Y-m-d') . '.csv');
 
     $output = fopen('php://output', 'w');
     fputcsv($output, [
@@ -893,7 +1048,7 @@ function budsheets_export_items_csv() {
         'Entered Amount (Native)',
         'Monthly Base (CAD)',
         'Monthly Total w/ Tax (CAD)',
-        'Annual Total w/ Tax (CAD)',
+        'Fiscal Year (' . $fy . ') Total w/ Tax (CAD)',
         'Tax Type',
         'Invoice Schedule',
         'Contract Review Date',
@@ -904,7 +1059,7 @@ function budsheets_export_items_csv() {
     ]);
 
     foreach ($items as $item) {
-        $tax = budsheets_calculate_item_cost_and_tax((float)$item['monthly_cost'], $item['billing_frequency'] ?? 'monthly', $item['tax_type']);
+        $tax = budsheets_calculate_item_fy_cost($item, $fy);
         $monthlyBaseCad = budsheets_convert_to_cad($tax['monthly_base'], $item['currency']);
         $monthlyTotalCad = budsheets_convert_to_cad($tax['monthly_total'], $item['currency']);
         $annualTotalCad = budsheets_convert_to_cad($tax['annual_total'], $item['currency']);

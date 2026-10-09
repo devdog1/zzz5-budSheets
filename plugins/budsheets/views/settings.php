@@ -25,9 +25,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     if ($action === 'save_rates') {
         if (budsheets_save_settings($_POST)) {
-            $message = 'Tax and Currency Exchange Rates updated successfully.';
+            $message = 'Tax, Currency Exchange Rates, and Fiscal Year settings updated successfully.';
         } else {
-            $error = 'Failed to update rates.';
+            $error = 'Failed to update settings.';
         }
     } elseif ($action === 'create_class') {
         $lob_id = (int)($_POST['lob_id'] ?? 0);
@@ -72,13 +72,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
 $settings = budsheets_get_settings();
 $classes = budsheets_get_all_classes();
+
+$monthsList = [
+    1 => 'January', 2 => 'February', 3 => 'March', 4 => 'April',
+    5 => 'May', 6 => 'June', 7 => 'July', 8 => 'August',
+    9 => 'September', 10 => 'October', 11 => 'November', 12 => 'December'
+];
+
+$currentFy = budsheets_get_fiscal_year();
 ?>
 
 <div class="container-fluid py-4">
     <div class="d-flex justify-content-between align-items-center mb-4">
         <div>
             <h2 class="fw-bold text-dark mb-1"><i class="fa-solid fa-gear me-2 text-primary"></i>Plugin Settings & Configurations</h2>
-            <p class="text-muted small mb-0">Manage PST/GST tax rates, currency conversion rates to CAD, and LOB expense classes.</p>
+            <p class="text-muted small mb-0">Manage Fiscal Year boundaries, PST/GST tax rates, currency exchange rates to CAD, and LOB expense classes.</p>
         </div>
     </div>
 
@@ -97,16 +105,40 @@ $classes = budsheets_get_all_classes();
     <?php endif; ?>
 
     <div class="row g-4 mb-4">
-        <!-- Tax Rates & Currency Conversion Box -->
+        <!-- Fiscal Year, Tax Rates & Currency Conversion Box -->
         <div class="col-lg-6">
             <div class="card border-0 shadow-sm h-100">
                 <div class="card-header bg-white py-3">
-                    <h5 class="fw-bold mb-0 text-dark"><i class="fa-solid fa-percent me-2 text-primary"></i>Tax Rates & Currency Conversion to CAD</h5>
+                    <h5 class="fw-bold mb-0 text-dark"><i class="fa-solid fa-sliders me-2 text-primary"></i>Fiscal Year, Taxes & Currency Conversion</h5>
                 </div>
                 <div class="card-body">
                     <form method="POST">
                         <?php if (function_exists('csrf_field')) echo csrf_field(); ?>
                         <input type="hidden" name="action" value="save_rates">
+
+                        <h6 class="fw-bold text-secondary mb-3"><i class="fa-solid fa-calendar-days me-1"></i>Financial / Fiscal Year Definition</h6>
+                        <div class="row g-3 mb-4">
+                            <div class="col-6">
+                                <label class="form-label fw-semibold">Fiscal Year Start Month</label>
+                                <select name="fiscal_year_start_month" class="form-select" required>
+                                    <?php foreach ($monthsList as $mNum => $mName): ?>
+                                        <option value="<?= $mNum ?>" <?= ((int)$settings['fiscal_year_start_month'] === $mNum) ? 'selected' : '' ?>>
+                                            <?= $mName ?>
+                                        </option>
+                                    <?php endforeach; ?>
+                                </select>
+                            </div>
+                            <div class="col-6">
+                                <label class="form-label fw-semibold">Start Day of Month</label>
+                                <input type="number" min="1" max="28" name="fiscal_year_start_day" class="form-control" value="<?= e($settings['fiscal_year_start_day'] ?? 1) ?>" required>
+                            </div>
+                            <div class="col-12">
+                                <div class="p-2 bg-light rounded border text-muted small">
+                                    <i class="fa-solid fa-circle-info me-1 text-info"></i> Current calculated active Fiscal Year: <strong>FY<?= $currentFy ?></strong>
+                                    <br><span class="text-secondary">(Note: Fiscal Year is named after the calendar year number that Jan 1st falls into)</span>
+                                </div>
+                            </div>
+                        </div>
 
                         <h6 class="fw-bold text-secondary mb-3"><i class="fa-solid fa-receipt me-1"></i>Tax Rates (%)</h6>
                         <div class="row g-3 mb-4">
@@ -148,7 +180,7 @@ $classes = budsheets_get_all_classes();
                         </div>
 
                         <div class="text-end mt-4">
-                            <button type="submit" class="btn btn-primary px-4"><i class="fa-solid fa-floppy-disk me-1"></i> Save Rates</button>
+                            <button type="submit" class="btn btn-primary px-4"><i class="fa-solid fa-floppy-disk me-1"></i> Save Settings</button>
                         </div>
                     </form>
                 </div>
