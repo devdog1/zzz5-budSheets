@@ -383,7 +383,7 @@ function budsheets_get_dashboard_summary() {
 }
 
 // ==========================================
-// File Download Handler
+// File Download & CSV Export Handlers
 // ==========================================
 
 function budsheets_handle_file_download() {
@@ -428,5 +428,51 @@ function budsheets_handle_file_download() {
     header('Pragma: public');
     header('Content-Length: ' . filesize($filePath));
     readfile($filePath);
+    exit;
+}
+
+function budsheets_export_items_csv() {
+    $lob_id = isset($_GET['lob_id']) ? (int)$_GET['lob_id'] : null;
+    $items = budsheets_get_items($lob_id);
+
+    header('Content-Type: text/csv; charset=utf-8');
+    header('Content-Disposition: attachment; filename=operational_budget_items_' . date('Y-m-d') . '.csv');
+
+    $output = fopen('php://output', 'w');
+    fputcsv($output, [
+        'ID',
+        'Line of Business',
+        'Vendor',
+        'Product',
+        'Class',
+        'Currency',
+        'Monthly Cost',
+        'Tax Type',
+        'Invoice Schedule',
+        'Invoice Date',
+        'Contract Start',
+        'Contract End',
+        'Description'
+    ]);
+
+    foreach ($items as $item) {
+        fputcsv($output, [
+            $item['id'],
+            $item['lob_name'],
+            $item['vendor'],
+            $item['product'],
+            $item['class'],
+            $item['currency'],
+            $item['monthly_cost'],
+            $item['tax_type'],
+            $item['invoice_type'],
+            $item['invoice_date'],
+            $item['contract_start_date'],
+            $item['contract_end_date'],
+            $item['description']
+        ]);
+    }
+
+    fclose($output);
     exit;
 }

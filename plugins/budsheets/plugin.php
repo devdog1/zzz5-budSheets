@@ -111,4 +111,11 @@ add_action('register_routes', function() {
         }
         budsheets_handle_file_download();
     });
+
+    register_route('budsheets_export_csv', function() {
+        if (!has_permission('budsheets_view')) {
+            die('Access Denied');
+        }
+        budsheets_export_items_csv();
+    });
 });

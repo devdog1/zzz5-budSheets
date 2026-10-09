@@ -210,11 +210,16 @@ $items = budsheets_get_items($filterLob);
                 <h2 class="fw-bold text-dark mb-1"><i class="fa-solid fa-file-invoice-dollar me-2 text-primary"></i>Operational Budget Items</h2>
                 <p class="text-muted small mb-0">Track vendors, products, contract lengths, recurring costs, and associated invoices.</p>
             </div>
-            <?php if (has_permission('budsheets_edit')): ?>
-                <a href="<?= url_for('budsheets_items') ?>&action=new<?= $filterLob ? '&lob_id=' . $filterLob : '' ?>" class="btn btn-primary">
-                    <i class="fa-solid fa-plus me-1"></i> Add Budget Item
+            <div>
+                <a href="<?= url_for('budsheets_export_csv') ?><?= $filterLob ? '&lob_id=' . $filterLob : '' ?>" class="btn btn-outline-success me-2">
+                    <i class="fa-solid fa-file-csv me-1"></i> Export CSV
                 </a>
-            <?php endif; ?>
+                <?php if (has_permission('budsheets_edit')): ?>
+                    <a href="<?= url_for('budsheets_items') ?>&action=new<?= $filterLob ? '&lob_id=' . $filterLob : '' ?>" class="btn btn-primary">
+                        <i class="fa-solid fa-plus me-1"></i> Add Budget Item
+                    </a>
+                <?php endif; ?>
+            </div>
         </div>
 
         <!-- Filter Bar -->
