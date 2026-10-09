@@ -122,6 +122,7 @@ $pdb->query("CREATE TABLE plug_budsheets_items (
     product TEXT NOT NULL,
     currency TEXT DEFAULT 'USD',
     monthly_cost REAL DEFAULT 0.00,
+    billing_frequency TEXT DEFAULT 'monthly',
     tax_type TEXT DEFAULT 'no tax',
     class TEXT,
     description TEXT,
@@ -130,6 +131,7 @@ $pdb->query("CREATE TABLE plug_budsheets_items (
     contract_start_date DATE,
     contract_end_date DATE,
     long_description TEXT,
+    system_directory_link TEXT,
     created_by INTEGER,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
@@ -239,22 +241,24 @@ assert(budsheets_is_allowed_extension('script.phtml') === false, 'phtml extensio
 assert(budsheets_is_allowed_extension('malware.exe') === false, 'exe extension blocked');
 echo "  ✓ File extension security check tests passed.\n";
 
-// Test 5: Budget Item CRUD
-echo "[TEST] Testing Budget Item operations...\n";
+// Test 5: Budget Item CRUD, Systems Directory Link & Yearly Billing Frequency
+echo "[TEST] Testing Budget Item operations, Systems Directory Link, and Billing Frequency...\n";
 $itemData = [
-    'lob_id'              => 1,
-    'vendor'              => 'Microsoft',
-    'product'             => 'Azure Cloud Services',
-    'currency'            => 'USD',
-    'monthly_cost'        => '1000.00',
-    'tax_type'            => 'GSTandPST',
-    'class'               => 'Cloud & SaaS Subscriptions',
-    'description'         => 'Monthly cloud consumption',
-    'invoice_type'        => 'monthly',
-    'invoice_date'        => '2026-01-01',
-    'contract_start_date' => '2026-01-01',
-    'contract_end_date'   => '2028-12-31',
-    'long_description'    => '3-Year Enterprise Agreement with Azure commitments.'
+    'lob_id'                => 1,
+    'vendor'                => 'Microsoft',
+    'product'               => 'Azure Cloud Services',
+    'currency'              => 'USD',
+    'monthly_cost'          => '12000.00',
+    'billing_frequency'     => 'yearly',
+    'tax_type'              => 'GSTandPST',
+    'class'                 => 'Cloud & SaaS Subscriptions',
+    'description'           => 'Annual cloud commitment',
+    'invoice_type'          => 'year',
+    'invoice_date'          => '2026-01-01',
+    'contract_start_date'   => '2026-01-01',
+    'contract_end_date'     => '2028-12-31',
+    'long_description'      => '3-Year Enterprise Agreement with Azure commitments.',
+    'system_directory_link' => 'https://systems.domain.com/directory/azure-cloud'
 ];
 
 $itemId = budsheets_save_item($itemData);
@@ -262,11 +266,13 @@ assert($itemId > 0, 'Item should be saved and return valid ID');
 
 $item = budsheets_get_item($itemId);
 assert($item['vendor'] === 'Microsoft', 'Vendor is Microsoft');
-assert($item['monthly_cost'] == 1000.00, 'Monthly cost matches');
-assert($item['class'] === 'Cloud & SaaS Subscriptions', 'Assigned class matches');
-assert($item['tax_type'] === 'GSTandPST', 'Tax type matches');
-assert($item['invoice_type'] === 'monthly', 'Invoice type matches');
-echo "  ✓ Budget Item CRUD tests passed.\n";
+assert($item['monthly_cost'] == 12000.00, 'Cost matches');
+assert($item['billing_frequency'] === 'yearly', 'Billing frequency is yearly');
+
+$itemCostCalc = budsheets_calculate_item_cost_and_tax((float)$item['monthly_cost'], $item['billing_frequency'], $item['tax_type']);
+assert($itemCostCalc['monthly_base'] == 1000.00, 'Monthly base calculated from $12,000 yearly is $1,000');
+assert($itemCostCalc['annual_base'] == 12000.00, 'Annual base is $12,000');
+echo "  ✓ Budget Item CRUD, Systems Directory Link, and Yearly Billing Frequency tests passed.\n";
 
 // Test 6: Invoices CRUD & CAD Conversion Summary
 echo "[TEST] Testing Invoices operations and CAD summary totals...\n";

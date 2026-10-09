@@ -85,8 +85,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 $contracts = budsheets_get_contract_files($itemId);
 $invoices = budsheets_get_invoices($itemId);
 
-$taxCalc = budsheets_calculate_tax((float)$item['monthly_cost'], $item['tax_type']);
-$monthlyCad = budsheets_convert_to_cad($taxCalc['total'], $item['currency']);
+$costCalc = budsheets_calculate_item_cost_and_tax((float)$item['monthly_cost'], $item['billing_frequency'] ?? 'monthly', $item['tax_type']);
+$monthlyCad = budsheets_convert_to_cad($costCalc['monthly_total'], $item['currency']);
+$annualCad = budsheets_convert_to_cad($costCalc['annual_total'], $item['currency']);
 
 $totalInvoicedCad = 0.0;
 foreach ($invoices as $inv) {
@@ -138,13 +139,19 @@ foreach ($invoices as $inv) {
                 <div class="card-body">
                     <div class="row g-3">
                         <div class="col-md-4">
-                            <div class="small text-muted">Monthly Base Cost</div>
+                            <div class="small text-muted">Entered Recurring Cost</div>
                             <div class="fs-5 fw-bold text-dark">$<?= number_format((float)$item['monthly_cost'], 2) ?> <small><?= e($item['currency']) ?></small></div>
+                            <div class="small text-muted">(<?= ucfirst(e($item['billing_frequency'] ?? 'monthly')) ?>)</div>
                         </div>
 
                         <div class="col-md-4">
                             <div class="small text-muted">Monthly Total w/ Tax (CAD)</div>
-                            <div class="fs-5 fw-bold text-success">$<?= number_format($monthlyCad, 2) ?> CAD</div>
+                            <div class="fs-5 fw-bold text-primary">$<?= number_format($monthlyCad, 2) ?> CAD</div>
+                        </div>
+
+                        <div class="col-md-4">
+                            <div class="small text-muted">Full Year Annual Total (CAD)</div>
+                            <div class="fs-5 fw-bold text-success">$<?= number_format($annualCad, 2) ?> CAD</div>
                         </div>
 
                         <div class="col-md-4">
@@ -153,7 +160,7 @@ foreach ($invoices as $inv) {
                                 <span class="badge bg-info-subtle text-info-emphasis me-1"><?= e($item['tax_type']) ?></span>
                             </div>
                             <div class="small text-muted">
-                                GST: $<?= number_format($taxCalc['gst'], 2) ?> | PST: $<?= number_format($taxCalc['pst'], 2) ?>
+                                GST: $<?= number_format($costCalc['monthly_gst'], 2) ?>/mo | PST: $<?= number_format($costCalc['monthly_pst'], 2) ?>/mo
                             </div>
                         </div>
 
@@ -168,7 +175,7 @@ foreach ($invoices as $inv) {
                         </div>
 
                         <div class="col-md-4">
-                            <div class="small text-muted">Invoice Date</div>
+                            <div class="small text-muted">Contract Review Date</div>
                             <div class="fw-semibold text-dark"><?= e($item['invoice_date'] ?: 'N/A') ?></div>
                         </div>
 
@@ -182,6 +189,17 @@ foreach ($invoices as $inv) {
                                 <?php endif; ?>
                             </div>
                         </div>
+
+                        <?php if (!empty($item['system_directory_link'])): ?>
+                            <div class="col-md-4">
+                                <div class="small text-muted">Systems Directory Link</div>
+                                <div>
+                                    <a href="<?= e($item['system_directory_link']) ?>" target="_blank" class="btn btn-sm btn-outline-primary mt-1">
+                                        <i class="fa-solid fa-arrow-up-right-from-square me-1"></i> Open Systems Directory
+                                    </a>
+                                </div>
+                            </div>
+                        <?php endif; ?>
 
                         <div class="col-12 mt-3">
                             <div class="small text-muted">Short Description</div>

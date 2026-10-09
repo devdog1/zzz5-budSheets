@@ -38,6 +38,32 @@ function budsheets_ensure_tables_exist($pdb) {
             }
         }
     }
+
+    // Auto-migrate system_directory_link column if missing
+    try {
+        $itemsTable = $pdb->getTableName('items');
+        $pdb->query("SELECT system_directory_link FROM {$itemsTable} LIMIT 1");
+    } catch (Exception $e) {
+        try {
+            $itemsTable = $pdb->getTableName('items');
+            $pdb->query("ALTER TABLE {$itemsTable} ADD COLUMN system_directory_link VARCHAR(500) DEFAULT NULL");
+        } catch (Exception $ex) {
+            // Ignore
+        }
+    }
+
+    // Auto-migrate billing_frequency column if missing
+    try {
+        $itemsTable = $pdb->getTableName('items');
+        $pdb->query("SELECT billing_frequency FROM {$itemsTable} LIMIT 1");
+    } catch (Exception $e) {
+        try {
+            $itemsTable = $pdb->getTableName('items');
+            $pdb->query("ALTER TABLE {$itemsTable} ADD COLUMN billing_frequency ENUM('monthly', 'yearly') NOT NULL DEFAULT 'monthly'");
+        } catch (Exception $ex) {
+            // Ignore
+        }
+    }
 }
 
 /**
@@ -139,32 +165,61 @@ function budsheets_convert_to_cad($amount, $currency = 'CAD') {
 }
 
 /**
- * Calculate tax breakdown for an item in its native currency
+ * Calculate cost breakdown and tax for an item (supporting monthly or yearly billing frequency)
  */
-function budsheets_calculate_tax($amount, $taxType) {
+function budsheets_calculate_item_cost_and_tax($rawAmount, $billingFrequency, $taxType) {
+    $amount = (float)$rawAmount;
+    $freq = strtolower($billingFrequency) === 'yearly' ? 'yearly' : 'monthly';
+
+    $monthlyBase = $freq === 'yearly' ? ($amount / 12.0) : $amount;
+    $annualBase = $freq === 'yearly' ? $amount : ($amount * 12.0);
+
     $settings = budsheets_get_settings();
     $gstRate = $settings['gst_rate'] / 100.0;
     $pstRate = $settings['pst_rate'] / 100.0;
 
-    $gstAmount = 0.0;
-    $pstAmount = 0.0;
+    $gstMultiplier = 0.0;
+    $pstMultiplier = 0.0;
 
     if ($taxType === 'GSTandPST') {
-        $gstAmount = $amount * $gstRate;
-        $pstAmount = $amount * $pstRate;
+        $gstMultiplier = $gstRate;
+        $pstMultiplier = $pstRate;
     } elseif ($taxType === 'GST only') {
-        $gstAmount = $amount * $gstRate;
+        $gstMultiplier = $gstRate;
     } elseif ($taxType === 'PST only') {
-        $pstAmount = $amount * $pstRate;
+        $pstMultiplier = $pstRate;
     }
 
-    $totalWithTax = $amount + $gstAmount + $pstAmount;
+    $monthlyGst = $monthlyBase * $gstMultiplier;
+    $monthlyPst = $monthlyBase * $pstMultiplier;
+    $monthlyTotal = $monthlyBase + $monthlyGst + $monthlyPst;
+
+    $annualGst = $annualBase * $gstMultiplier;
+    $annualPst = $annualBase * $pstMultiplier;
+    $annualTotal = $annualBase + $annualGst + $annualPst;
 
     return [
-        'base' => $amount,
-        'gst' => $gstAmount,
-        'pst' => $pstAmount,
-        'total' => $totalWithTax
+        'monthly_base'  => $monthlyBase,
+        'monthly_gst'   => $monthlyGst,
+        'monthly_pst'   => $monthlyPst,
+        'monthly_total' => $monthlyTotal,
+        'annual_base'   => $annualBase,
+        'annual_gst'    => $annualGst,
+        'annual_pst'    => $annualPst,
+        'annual_total'  => $annualTotal
+    ];
+}
+
+/**
+ * Helper wrapper for backward compatibility
+ */
+function budsheets_calculate_tax($amount, $taxType, $billingFrequency = 'monthly') {
+    $calc = budsheets_calculate_item_cost_and_tax($amount, $billingFrequency, $taxType);
+    return [
+        'base'  => $calc['monthly_base'],
+        'gst'   => $calc['monthly_gst'],
+        'pst'   => $calc['monthly_pst'],
+        'total' => $calc['monthly_total']
     ];
 }
 
@@ -285,10 +340,28 @@ function budsheets_set_lob_users($lob_id, $user_ids = []) {
 }
 
 function budsheets_get_all_system_users() {
+    if (function_exists('get_all_users')) {
+        try {
+            $users = get_all_users();
+            if (!empty($users)) {
+                return array_map(function($u) {
+                    return [
+                        'id' => $u['id'],
+                        'name' => $u['display_name'] ?? $u['name'] ?? $u['username'] ?? 'User #' . $u['id'],
+                        'email' => $u['email'] ?? $u['username'] ?? ''
+                    ];
+                }, $users);
+            }
+        } catch (Exception $e) {
+            // Fallback
+        }
+    }
+
     try {
-        $pdb = budsheets_db();
-        if ($pdb) {
-            return $pdb->query("SELECT id, name, email FROM users ORDER BY name ASC")->fetchAll();
+        if (function_exists('get_db_connection')) {
+            $db = get_db_connection();
+            $rows = $db->query("SELECT id, COALESCE(display_name, username) as name, email FROM users ORDER BY name ASC")->fetchAll();
+            return $rows ?: [];
         }
     } catch (Exception $e) {
         // Fallback if users table doesn't exist
@@ -421,19 +494,21 @@ function budsheets_save_item($data, $item_id = null) {
     $userId = $_SESSION['user_id'] ?? null;
 
     $fields = [
-        'lob_id'              => $lobId,
-        'vendor'              => trim($data['vendor']),
-        'product'             => trim($data['product']),
-        'currency'            => trim($data['currency'] ?? 'USD'),
-        'monthly_cost'        => (float)($data['monthly_cost'] ?? 0),
-        'tax_type'            => $data['tax_type'] ?? 'no tax',
-        'class'               => trim($data['class'] ?? ''),
-        'description'         => trim($data['description'] ?? ''),
-        'invoice_type'        => $data['invoice_type'] ?? 'monthly',
-        'invoice_date'        => !empty($data['invoice_date']) ? $data['invoice_date'] : null,
-        'contract_start_date' => !empty($data['contract_start_date']) ? $data['contract_start_date'] : null,
-        'contract_end_date'   => !empty($data['contract_end_date']) ? $data['contract_end_date'] : null,
-        'long_description'    => trim($data['long_description'] ?? '')
+        'lob_id'                => $lobId,
+        'vendor'                => trim($data['vendor']),
+        'product'               => trim($data['product']),
+        'currency'              => trim($data['currency'] ?? 'USD'),
+        'monthly_cost'          => (float)($data['monthly_cost'] ?? 0),
+        'billing_frequency'     => ($data['billing_frequency'] ?? 'monthly') === 'yearly' ? 'yearly' : 'monthly',
+        'tax_type'              => $data['tax_type'] ?? 'no tax',
+        'class'                 => trim($data['class'] ?? ''),
+        'description'           => trim($data['description'] ?? ''),
+        'invoice_type'          => $data['invoice_type'] ?? 'monthly',
+        'invoice_date'          => !empty($data['invoice_date']) ? $data['invoice_date'] : null,
+        'contract_start_date'   => !empty($data['contract_start_date']) ? $data['contract_start_date'] : null,
+        'contract_end_date'     => !empty($data['contract_end_date']) ? $data['contract_end_date'] : null,
+        'long_description'      => trim($data['long_description'] ?? ''),
+        'system_directory_link' => trim($data['system_directory_link'] ?? '')
     ];
 
     if ($item_id) {
@@ -444,8 +519,9 @@ function budsheets_save_item($data, $item_id = null) {
 
         $sql = "UPDATE {$table} SET
                     lob_id = ?, vendor = ?, product = ?, currency = ?, monthly_cost = ?,
-                    tax_type = ?, class = ?, description = ?, invoice_type = ?, invoice_date = ?,
-                    contract_start_date = ?, contract_end_date = ?, long_description = ?
+                    billing_frequency = ?, tax_type = ?, class = ?, description = ?, invoice_type = ?, invoice_date = ?,
+                    contract_start_date = ?, contract_end_date = ?, long_description = ?,
+                    system_directory_link = ?
                 WHERE id = ?";
         $params = array_values($fields);
         $params[] = (int)$item_id;
@@ -453,7 +529,7 @@ function budsheets_save_item($data, $item_id = null) {
         return (int)$item_id;
     } else {
         $fields['created_by'] = $userId;
-        $sql = "INSERT INTO {$table} (lob_id, vendor, product, currency, monthly_cost, tax_type, class, description, invoice_type, invoice_date, contract_start_date, contract_end_date, long_description, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+        $sql = "INSERT INTO {$table} (lob_id, vendor, product, currency, monthly_cost, billing_frequency, tax_type, class, description, invoice_type, invoice_date, contract_start_date, contract_end_date, long_description, system_directory_link, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
         $pdb->query($sql, array_values($fields));
         return budsheets_last_insert_id($pdb);
     }
@@ -714,8 +790,8 @@ function budsheets_get_dashboard_summary() {
 
     $monthlyCostCad = 0.0;
     foreach ($items as $item) {
-        $mTax = budsheets_calculate_tax((float)$item['monthly_cost'], $item['tax_type']);
-        $monthlyCostCad += budsheets_convert_to_cad($mTax['total'], $item['currency']);
+        $mTax = budsheets_calculate_item_cost_and_tax((float)$item['monthly_cost'], $item['billing_frequency'] ?? 'monthly', $item['tax_type']);
+        $monthlyCostCad += budsheets_convert_to_cad($mTax['monthly_total'], $item['currency']);
     }
 
     return [
@@ -812,37 +888,46 @@ function budsheets_export_items_csv() {
         'Vendor',
         'Product',
         'Class',
+        'Billing Frequency',
         'Currency',
-        'Monthly Cost (Native)',
+        'Entered Amount (Native)',
+        'Monthly Base (CAD)',
         'Monthly Total w/ Tax (CAD)',
         'Annual Total w/ Tax (CAD)',
         'Tax Type',
         'Invoice Schedule',
-        'Invoice Date',
+        'Contract Review Date',
         'Contract Start',
         'Contract End',
-        'Description'
+        'Description',
+        'Systems Directory Link'
     ]);
 
     foreach ($items as $item) {
-        $tax = budsheets_calculate_tax((float)$item['monthly_cost'], $item['tax_type']);
-        $monthlyCad = budsheets_convert_to_cad($tax['total'], $item['currency']);
+        $tax = budsheets_calculate_item_cost_and_tax((float)$item['monthly_cost'], $item['billing_frequency'] ?? 'monthly', $item['tax_type']);
+        $monthlyBaseCad = budsheets_convert_to_cad($tax['monthly_base'], $item['currency']);
+        $monthlyTotalCad = budsheets_convert_to_cad($tax['monthly_total'], $item['currency']);
+        $annualTotalCad = budsheets_convert_to_cad($tax['annual_total'], $item['currency']);
+
         fputcsv($output, [
             $item['id'],
             $item['lob_name'],
             $item['vendor'],
             $item['product'],
             $item['class'],
+            ucfirst($item['billing_frequency'] ?? 'monthly'),
             $item['currency'],
             $item['monthly_cost'],
-            number_format($monthlyCad, 2, '.', ''),
-            number_format($monthlyCad * 12, 2, '.', ''),
+            number_format($monthlyBaseCad, 2, '.', ''),
+            number_format($monthlyTotalCad, 2, '.', ''),
+            number_format($annualTotalCad, 2, '.', ''),
             $item['tax_type'],
             $item['invoice_type'],
             $item['invoice_date'],
             $item['contract_start_date'],
             $item['contract_end_date'],
-            $item['description']
+            $item['description'],
+            $item['system_directory_link']
         ]);
     }
 

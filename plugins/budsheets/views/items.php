@@ -150,10 +150,25 @@ foreach ($allClasses as $c) {
                         </div>
 
                         <div class="col-md-3">
-                            <label class="form-label fw-semibold">Monthly Base Cost</label>
+                            <label class="form-label fw-semibold">Billing Frequency</label>
+                            <select name="billing_frequency" id="billing_frequency" class="form-select" onchange="calculateAmounts()">
+                                <option value="monthly" <?= ($editItem['billing_frequency'] ?? 'monthly') === 'monthly' ? 'selected' : '' ?>>Monthly</option>
+                                <option value="yearly" <?= ($editItem['billing_frequency'] ?? '') === 'yearly' ? 'selected' : '' ?>>Full Year / Annual</option>
+                            </select>
+                        </div>
+
+                        <div class="col-md-3">
+                            <label class="form-label fw-semibold">Recurring Amount <span class="text-danger">*</span></label>
                             <div class="input-group">
                                 <span class="input-group-text">$</span>
-                                <input type="number" step="0.01" name="monthly_cost" class="form-control" value="<?= e($editItem['monthly_cost'] ?? '0.00') ?>" required>
+                                <input type="number" step="0.01" name="monthly_cost" id="monthly_cost" class="form-control" value="<?= e($editItem['monthly_cost'] ?? '0.00') ?>" oninput="calculateAmounts()" required>
+                            </div>
+                        </div>
+
+                        <div class="col-md-3">
+                            <label class="form-label fw-semibold">Calculated Equivalent</label>
+                            <div class="p-2 bg-light rounded border text-muted small" id="calculated_summary">
+                                Entering amount...
                             </div>
                         </div>
 
@@ -174,19 +189,28 @@ foreach ($allClasses as $c) {
                             </select>
                         </div>
 
-                        <div class="col-md-4">
-                            <label class="form-label fw-semibold">Invoice Date</label>
+                        <div class="col-md-3">
+                            <label class="form-label fw-semibold">Contract Review Date</label>
                             <input type="date" name="invoice_date" class="form-control" value="<?= e($editItem['invoice_date'] ?? '') ?>">
                         </div>
 
-                        <div class="col-md-4">
+                        <div class="col-md-3">
                             <label class="form-label fw-semibold">Contract Start Date</label>
                             <input type="date" name="contract_start_date" class="form-control" value="<?= e($editItem['contract_start_date'] ?? '') ?>">
                         </div>
 
-                        <div class="col-md-4">
+                        <div class="col-md-3">
                             <label class="form-label fw-semibold">Contract End Date</label>
                             <input type="date" name="contract_end_date" class="form-control" value="<?= e($editItem['contract_end_date'] ?? '') ?>">
+                        </div>
+
+                        <div class="col-md-12">
+                            <label class="form-label fw-semibold">External Systems Directory Link (Optional)</label>
+                            <div class="input-group">
+                                <span class="input-group-text"><i class="fa-solid fa-link"></i></span>
+                                <input type="url" name="system_directory_link" class="form-control" value="<?= e($editItem['system_directory_link'] ?? '') ?>" placeholder="https://systems.domain.com/directory/item-123">
+                            </div>
+                            <div class="form-text">Direct URL link to this system entry in the internal Systems Directory.</div>
                         </div>
 
                         <div class="col-md-12">
@@ -244,7 +268,24 @@ foreach ($allClasses as $c) {
                 }
             }
 
-            document.addEventListener('DOMContentLoaded', updateClassOptions);
+            function calculateAmounts() {
+                const freq = document.getElementById('billing_frequency').value;
+                const cost = parseFloat(document.getElementById('monthly_cost').value) || 0;
+                const summary = document.getElementById('calculated_summary');
+
+                if (freq === 'yearly') {
+                    const m = cost / 12.0;
+                    summary.innerHTML = '<strong>Monthly Eq:</strong> $' + m.toFixed(2) + '<br><strong>Annual Base:</strong> $' + cost.toFixed(2);
+                } else {
+                    const a = cost * 12.0;
+                    summary.innerHTML = '<strong>Monthly Base:</strong> $' + cost.toFixed(2) + '<br><strong>Annual Eq:</strong> $' + a.toFixed(2);
+                }
+            }
+
+            document.addEventListener('DOMContentLoaded', function() {
+                updateClassOptions();
+                calculateAmounts();
+            });
         </script>
 
     <?php else: ?>
@@ -300,8 +341,9 @@ foreach ($allClasses as $c) {
                                 <th class="ps-3">Line of Business</th>
                                 <th>Vendor / Product</th>
                                 <th>Class</th>
-                                <th>Monthly Cost (Native)</th>
+                                <th>Entered Cost</th>
                                 <th>Monthly Total w/ Tax (CAD)</th>
+                                <th>Full Year Annual Total (CAD)</th>
                                 <th>Tax Type</th>
                                 <th>Invoice Type</th>
                                 <th>Contract Term</th>
@@ -311,12 +353,13 @@ foreach ($allClasses as $c) {
                         <tbody>
                             <?php if (empty($items)): ?>
                                 <tr>
-                                    <td colspan="9" class="text-center py-4 text-muted">No budget items found.</td>
+                                    <td colspan="10" class="text-center py-4 text-muted">No budget items found.</td>
                                 </tr>
                             <?php else: ?>
                                 <?php foreach ($items as $item):
-                                    $tax = budsheets_calculate_tax((float)$item['monthly_cost'], $item['tax_type']);
-                                    $monthlyCad = budsheets_convert_to_cad($tax['total'], $item['currency']);
+                                    $costCalc = budsheets_calculate_item_cost_and_tax((float)$item['monthly_cost'], $item['billing_frequency'] ?? 'monthly', $item['tax_type']);
+                                    $monthlyCad = budsheets_convert_to_cad($costCalc['monthly_total'], $item['currency']);
+                                    $annualCad = budsheets_convert_to_cad($costCalc['annual_total'], $item['currency']);
                                 ?>
                                     <tr>
                                         <td class="ps-3">
@@ -329,9 +372,13 @@ foreach ($allClasses as $c) {
                                         <td><span class="badge bg-light text-dark border"><?= e($item['class'] ?: 'N/A') ?></span></td>
                                         <td class="fw-semibold text-secondary">
                                             $<?= number_format((float)$item['monthly_cost'], 2) ?> <small><?= e($item['currency']) ?></small>
+                                            <div class="small text-muted">(<?= ucfirst(e($item['billing_frequency'] ?? 'monthly')) ?>)</div>
+                                        </td>
+                                        <td class="fw-bold text-primary">
+                                            $<?= number_format($monthlyCad, 2) ?> CAD
                                         </td>
                                         <td class="fw-bold text-success">
-                                            $<?= number_format($monthlyCad, 2) ?> CAD
+                                            $<?= number_format($annualCad, 2) ?> CAD
                                         </td>
                                         <td><span class="badge bg-info-subtle text-info-emphasis"><?= e($item['tax_type']) ?></span></td>
                                         <td>
