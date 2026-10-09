@@ -12,6 +12,35 @@ if (file_exists(APP_ROOT . 'PluginDatabase.php')) {
 }
 
 /**
+ * Ensure all required database tables exist
+ */
+function budsheets_ensure_tables_exist($pdb) {
+    static $checked = false;
+    if ($checked) return;
+    $checked = true;
+
+    try {
+        $lobTable = $pdb->getTableName('lines_of_business');
+        $pdb->query("SELECT 1 FROM {$lobTable} LIMIT 1");
+    } catch (Exception $e) {
+        $sqlFile = __DIR__ . '/../sql/install.sql';
+        if (file_exists($sqlFile)) {
+            $sqlContent = file_get_contents($sqlFile);
+            $statements = array_filter(array_map('trim', explode(';', $sqlContent)));
+            foreach ($statements as $stmt) {
+                if (!empty($stmt)) {
+                    try {
+                        $pdb->query($stmt);
+                    } catch (Exception $ex) {
+                        // Ignore if table already exists
+                    }
+                }
+            }
+        }
+    }
+}
+
+/**
  * Get PluginDatabase instance for budsheets
  */
 function budsheets_db() {
@@ -19,6 +48,7 @@ function budsheets_db() {
     if ($pdb === null) {
         if (class_exists('PluginDatabase')) {
             $pdb = new PluginDatabase('budsheets');
+            budsheets_ensure_tables_exist($pdb);
         } else {
             $pdb = null;
         }
@@ -37,6 +67,15 @@ function budsheets_upload_dir() {
     return $dir;
 }
 
+/**
+ * Validate safe file extension
+ */
+function budsheets_is_allowed_extension($filename) {
+    $allowed = ['pdf', 'doc', 'docx', 'xls', 'xlsx', 'csv', 'txt', 'png', 'jpg', 'jpeg', 'webp'];
+    $ext = strtolower(pathinfo($filename, PATHINFO_EXTENSION));
+    return in_array($ext, $allowed, true);
+}
+
 // ==========================================
 // Lines of Business (LOB) Operations
 // ==========================================
@@ -48,18 +87,30 @@ function budsheets_get_lobs($user_id = null) {
     $userLobTable = $pdb->getTableName('lob_users');
 
     // Admin users can see all LOBs
-    if (has_permission('budsheets_admin') || $user_id === null) {
+    if (has_permission('budsheets_admin')) {
         return $pdb->query("SELECT * FROM {$table} ORDER BY name ASC")->fetchAll();
     }
 
-    // Filter by assigned user LOBs
-    $currentUserId = $user_id ?: ($_SESSION['user_id'] ?? 0);
+    // Filter by assigned user LOBs for non-admin users
+    $currentUserId = ($user_id !== null) ? $user_id : ($_SESSION['user_id'] ?? 0);
     $sql = "SELECT l.*
             FROM {$table} l
             INNER JOIN {$userLobTable} lu ON l.id = lu.lob_id
             WHERE lu.user_id = ?
             ORDER BY l.name ASC";
     return $pdb->query($sql, [(int)$currentUserId])->fetchAll();
+}
+
+function budsheets_user_has_lob_access($lob_id, $user_id = null) {
+    if (has_permission('budsheets_admin')) {
+        return true;
+    }
+    $currentUserId = ($user_id !== null) ? $user_id : ($_SESSION['user_id'] ?? 0);
+    $pdb = budsheets_db();
+    if (!$pdb) return false;
+    $userLobTable = $pdb->getTableName('lob_users');
+    $row = $pdb->query("SELECT 1 FROM {$userLobTable} WHERE lob_id = ? AND user_id = ?", [(int)$lob_id, (int)$currentUserId])->fetch();
+    return !empty($row);
 }
 
 function budsheets_get_lob($id) {
@@ -138,16 +189,13 @@ function budsheets_set_lob_users($lob_id, $user_ids = []) {
 }
 
 function budsheets_get_all_system_users() {
-    // Query framework users table if available
     try {
-        if (class_exists('db') || function_exists('current_user')) {
-            $pdb = budsheets_db();
-            if ($pdb) {
-                return $pdb->query("SELECT id, name, email FROM users ORDER BY name ASC")->fetchAll();
-            }
+        $pdb = budsheets_db();
+        if ($pdb) {
+            return $pdb->query("SELECT id, name, email FROM users ORDER BY name ASC")->fetchAll();
         }
     } catch (Exception $e) {
-        // Fallback or empty if system users table not available
+        // Fallback if users table doesn't exist
     }
     return [];
 }
@@ -169,13 +217,11 @@ function budsheets_get_items($lob_id = null) {
     $params = [];
     $where = [];
 
-    // Filter by specific requested LOB ID
     if ($lob_id) {
         $where[] = "i.lob_id = ?";
         $params[] = (int)$lob_id;
     }
 
-    // Direct LOB User permission filter for non-admin users
     if (!has_permission('budsheets_admin')) {
         $currentUserId = $_SESSION['user_id'] ?? 0;
         $where[] = "i.lob_id IN (SELECT lob_id FROM {$userLobTable} WHERE user_id = ?)";
@@ -215,12 +261,17 @@ function budsheets_get_item($id) {
 function budsheets_save_item($data, $item_id = null) {
     $pdb = budsheets_db();
     if (!$pdb) return false;
-    $table = $pdb->getTableName('items');
 
-    $userId = isset($_SESSION['user_id']) ? $_SESSION['user_id'] : null;
+    $lobId = (int)$data['lob_id'];
+    if (!budsheets_user_has_lob_access($lobId)) {
+        die('Access Denied: You do not have permissions for this Line of Business.');
+    }
+
+    $table = $pdb->getTableName('items');
+    $userId = $_SESSION['user_id'] ?? null;
 
     $fields = [
-        'lob_id'              => (int)$data['lob_id'],
+        'lob_id'              => $lobId,
         'vendor'              => trim($data['vendor']),
         'product'             => trim($data['product']),
         'currency'            => trim($data['currency'] ?? 'USD'),
@@ -236,6 +287,11 @@ function budsheets_save_item($data, $item_id = null) {
     ];
 
     if ($item_id) {
+        $existing = budsheets_get_item($item_id);
+        if (!$existing) {
+            die('Access Denied: Target item not found or access restricted.');
+        }
+
         $sql = "UPDATE {$table} SET
                     lob_id = ?, vendor = ?, product = ?, currency = ?, monthly_cost = ?,
                     tax_type = ?, class = ?, description = ?, invoice_type = ?, invoice_date = ?,
@@ -254,10 +310,14 @@ function budsheets_save_item($data, $item_id = null) {
 }
 
 function budsheets_delete_item($id) {
+    $item = budsheets_get_item($id);
+    if (!$item) {
+        die('Access Denied: Budget item not found or access restricted.');
+    }
+
     $pdb = budsheets_db();
     if (!$pdb) return false;
 
-    // Also delete uploaded contract files on disk
     $files = budsheets_get_contract_files($id);
     $uploadDir = budsheets_upload_dir();
     foreach ($files as $f) {
@@ -266,7 +326,6 @@ function budsheets_delete_item($id) {
         }
     }
 
-    // Also delete invoice attachment files on disk
     $invoices = budsheets_get_invoices($id);
     foreach ($invoices as $inv) {
         if (!empty($inv['attachment_stored_name']) && file_exists($uploadDir . $inv['attachment_stored_name'])) {
@@ -297,6 +356,11 @@ function budsheets_get_contract_file($file_id) {
 }
 
 function budsheets_save_contract_files($item_id, $files_array) {
+    $item = budsheets_get_item($item_id);
+    if (!$item) {
+        die('Access Denied: Budget item not found or access restricted.');
+    }
+
     $pdb = budsheets_db();
     if (!$pdb || empty($files_array['name'][0])) return;
 
@@ -308,7 +372,12 @@ function budsheets_save_contract_files($item_id, $files_array) {
     for ($i = 0; $i < $count; $i++) {
         if ($files_array['error'][$i] === UPLOAD_ERR_OK) {
             $origName = basename($files_array['name'][$i]);
-            $ext = pathinfo($origName, PATHINFO_EXTENSION);
+
+            if (!budsheets_is_allowed_extension($origName)) {
+                continue; // Skip dangerous or unallowed extensions
+            }
+
+            $ext = strtolower(pathinfo($origName, PATHINFO_EXTENSION));
             $storedName = 'contract_' . (int)$item_id . '_' . uniqid() . '.' . $ext;
             $targetPath = $uploadDir . $storedName;
 
@@ -330,10 +399,16 @@ function budsheets_save_contract_files($item_id, $files_array) {
 }
 
 function budsheets_delete_contract_file($file_id) {
-    $pdb = budsheets_db();
-    if (!$pdb) return false;
     $file = budsheets_get_contract_file($file_id);
     if ($file) {
+        $item = budsheets_get_item($file['item_id']);
+        if (!$item) {
+            die('Access Denied: Associated item not found or access restricted.');
+        }
+
+        $pdb = budsheets_db();
+        if (!$pdb) return false;
+
         $path = budsheets_upload_dir() . $file['stored_filename'];
         if (file_exists($path)) {
             @unlink($path);
@@ -363,6 +438,12 @@ function budsheets_get_invoice($invoice_id) {
 }
 
 function budsheets_save_invoice($data, $file = null, $invoice_id = null) {
+    $itemId = (int)$data['item_id'];
+    $item = budsheets_get_item($itemId);
+    if (!$item) {
+        die('Access Denied: Target budget item not found or access restricted.');
+    }
+
     $pdb = budsheets_db();
     if (!$pdb) return false;
 
@@ -374,10 +455,13 @@ function budsheets_save_invoice($data, $file = null, $invoice_id = null) {
     $storedName = null;
 
     if ($file && isset($file['error']) && $file['error'] === UPLOAD_ERR_OK) {
-        $origName = basename($file['name']);
-        $ext = pathinfo($origName, PATHINFO_EXTENSION);
-        $storedName = 'invoice_' . (int)$data['item_id'] . '_' . uniqid() . '.' . $ext;
-        move_uploaded_file($file['tmp_name'], $uploadDir . $storedName);
+        $candidateName = basename($file['name']);
+        if (budsheets_is_allowed_extension($candidateName)) {
+            $origName = $candidateName;
+            $ext = strtolower(pathinfo($origName, PATHINFO_EXTENSION));
+            $storedName = 'invoice_' . $itemId . '_' . uniqid() . '.' . $ext;
+            move_uploaded_file($file['tmp_name'], $uploadDir . $storedName);
+        }
     }
 
     if ($invoice_id) {
@@ -411,7 +495,7 @@ function budsheets_save_invoice($data, $file = null, $invoice_id = null) {
     } else {
         $sql = "INSERT INTO {$table} (item_id, invoice_number, amount_paid, currency, period_type, period_year, period_month, payment_date, comments, attachment_original_name, attachment_stored_name, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
         $pdb->query($sql, [
-            (int)$data['item_id'],
+            $itemId,
             trim($data['invoice_number'] ?? ''),
             (float)($data['amount_paid'] ?? 0),
             trim($data['currency'] ?? 'USD'),
@@ -429,10 +513,16 @@ function budsheets_save_invoice($data, $file = null, $invoice_id = null) {
 }
 
 function budsheets_delete_invoice($invoice_id) {
-    $pdb = budsheets_db();
-    if (!$pdb) return false;
     $inv = budsheets_get_invoice($invoice_id);
     if ($inv) {
+        $item = budsheets_get_item($inv['item_id']);
+        if (!$item) {
+            die('Access Denied: Associated item not found or access restricted.');
+        }
+
+        $pdb = budsheets_db();
+        if (!$pdb) return false;
+
         if (!empty($inv['attachment_stored_name'])) {
             $path = budsheets_upload_dir() . $inv['attachment_stored_name'];
             if (file_exists($path)) {
@@ -490,23 +580,32 @@ function budsheets_handle_file_download() {
 
     $storedName = null;
     $origName = null;
+    $itemId = null;
 
     if ($fileType === 'contract') {
         $file = budsheets_get_contract_file($fileId);
         if ($file) {
             $storedName = $file['stored_filename'];
             $origName = $file['original_filename'];
+            $itemId = $file['item_id'];
         }
     } elseif ($fileType === 'invoice') {
         $inv = budsheets_get_invoice($fileId);
         if ($inv) {
             $storedName = $inv['attachment_stored_name'];
             $origName = $inv['attachment_original_name'];
+            $itemId = $inv['item_id'];
         }
     }
 
-    if (!$storedName || !$origName) {
+    if (!$storedName || !$origName || !$itemId) {
         die('File not found');
+    }
+
+    // Access check: verify user has access to item's LOB
+    $item = budsheets_get_item($itemId);
+    if (!$item) {
+        die('Access Denied: You do not have permissions to download files for this item.');
     }
 
     $filePath = budsheets_upload_dir() . $storedName;

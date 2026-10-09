@@ -154,16 +154,16 @@ budsheets_add_lob('Information Technology', 'IT', 'IT Infrastructure and Softwar
 budsheets_add_lob('Human Resources', 'HR', 'HR Services', [12]);
 
 $lobs = budsheets_get_lobs();
-assert(count($lobs) === 2, 'Should return 2 LOBs');
+assert(count($lobs) === 2, 'Should return 2 LOBs for admin');
 
 $itUsers = budsheets_get_lob_users(1);
 assert(count($itUsers) === 2, 'IT LOB should have 2 assigned users');
 assert(in_array(10, $itUsers) && in_array(11, $itUsers), 'User 10 and 11 assigned to IT');
 
 // Test access filtering for non-admin user
-$user_permissions = ['budsheets_view']; // strip budsheets_admin
+$user_permissions = ['budsheets_view', 'budsheets_edit']; // strip budsheets_admin
 $_SESSION['user_id'] = 12;
-$hrUserLobs = budsheets_get_lobs(12);
+$hrUserLobs = budsheets_get_lobs();
 assert(count($hrUserLobs) === 1, 'Non-admin user 12 should only see 1 assigned LOB');
 assert($hrUserLobs[0]['name'] === 'Human Resources', 'User 12 sees HR LOB');
 
@@ -176,7 +176,16 @@ $updatedUsers = budsheets_get_lob_users(1);
 assert(count($updatedUsers) === 1 && $updatedUsers[0] == 10, 'IT LOB updated user assignment');
 echo "  ✓ LOB CRUD & User assignment tests passed.\n";
 
-// Test 2: Budget Item CRUD
+// Test 2: File Extension Whitelisting
+echo "[TEST] Testing file extension whitelisting...\n";
+assert(budsheets_is_allowed_extension('contract.pdf') === true, 'PDF extension allowed');
+assert(budsheets_is_allowed_extension('invoice.png') === true, 'PNG extension allowed');
+assert(budsheets_is_allowed_extension('exploit.php') === false, 'PHP extension blocked');
+assert(budsheets_is_allowed_extension('script.phtml') === false, 'phtml extension blocked');
+assert(budsheets_is_allowed_extension('malware.exe') === false, 'exe extension blocked');
+echo "  ✓ File extension security check tests passed.\n";
+
+// Test 3: Budget Item CRUD
 echo "[TEST] Testing Budget Item operations...\n";
 $itemData = [
     'lob_id'              => 1,
@@ -204,7 +213,7 @@ assert($item['tax_type'] === 'GSTandPST', 'Tax type matches');
 assert($item['invoice_type'] === 'monthly', 'Invoice type matches');
 echo "  ✓ Budget Item CRUD tests passed.\n";
 
-// Test 3: Invoices CRUD against Item
+// Test 4: Invoices CRUD against Item
 echo "[TEST] Testing Invoices operations...\n";
 $invData1 = [
     'item_id'        => $itemId,
@@ -241,7 +250,7 @@ $summary = budsheets_get_dashboard_summary();
 assert($summary['total_invoiced'] == 2501.00, 'Total invoiced sum is correct');
 echo "  ✓ Invoices CRUD tests passed.\n";
 
-// Test 4: Dynamic Routes & Hooks Verification
+// Test 5: Dynamic Routes & Hooks Verification
 echo "[TEST] Verifying plugin hooks and registered routes...\n";
 assert(isset($registered_routes['budsheets_dashboard']), 'Route budsheets_dashboard is registered');
 assert(isset($registered_routes['budsheets_lobs']), 'Route budsheets_lobs is registered');
