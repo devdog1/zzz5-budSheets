@@ -500,6 +500,83 @@ $monthsNames = [
     </div>
 </div>
 
+<!-- Add Invoice Modal -->
+<div class="modal fade" id="addInvoiceModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <form method="POST" enctype="multipart/form-data">
+                <?php if (function_exists('csrf_field')) echo csrf_field(); ?>
+                <input type="hidden" name="action" value="save_invoice">
+                <div class="modal-header">
+                    <h5 class="modal-title fw-bold"><i class="fa-solid fa-receipt me-2"></i>Record New Invoice</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label class="form-label fw-semibold">Invoice Number</label>
+                        <input type="text" name="invoice_number" class="form-control" placeholder="e.g. INV-2026-001">
+                    </div>
+                    <div class="row g-2 mb-3">
+                        <div class="col-8">
+                            <label class="form-label fw-semibold">Amount Paid <span class="text-danger">*</span></label>
+                            <input type="number" step="0.01" name="amount_paid" class="form-control" placeholder="0.00" required>
+                        </div>
+                        <div class="col-4">
+                            <label class="form-label fw-semibold">Currency</label>
+                            <select name="currency" class="form-select">
+                                <?php foreach (['USD', 'CAD', 'EUR', 'GBP', 'AUD'] as $curr): ?>
+                                    <option value="<?= $curr ?>" <?= $item['currency'] === $curr ? 'selected' : '' ?>><?= $curr ?></option>
+                                <?php endforeach; ?>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="row g-2 mb-3">
+                        <div class="col-6">
+                            <label class="form-label fw-semibold">Period Type</label>
+                            <select name="period_type" class="form-select">
+                                <option value="monthly">Monthly</option>
+                                <option value="full_year">Full Year</option>
+                            </select>
+                        </div>
+                        <div class="col-3">
+                            <label class="form-label fw-semibold">Year</label>
+                            <select name="period_year" class="form-select">
+                                <?php for ($y = date('Y') - 5; $y <= date('Y') + 5; $y++): ?>
+                                    <option value="<?= $y ?>" <?= date('Y') == $y ? 'selected' : '' ?>><?= $y ?></option>
+                                <?php endfor; ?>
+                            </select>
+                        </div>
+                        <div class="col-3">
+                            <label class="form-label fw-semibold">Month</label>
+                            <select name="period_month" class="form-select">
+                                <?php for ($m = 1; $m <= 12; $m++): ?>
+                                    <option value="<?= $m ?>" <?= date('n') == $m ? 'selected' : '' ?>><?= date('M', mktime(0, 0, 0, $m, 10)) ?></option>
+                                <?php endfor; ?>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label fw-semibold">Payment Date</label>
+                        <input type="date" name="payment_date" class="form-control" value="<?= date('Y-m-d') ?>">
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label fw-semibold">Comments / Notes</label>
+                        <textarea name="comments" class="form-control" rows="2" placeholder="Payment reference or comments..."></textarea>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label fw-semibold">Upload Invoice Attachment</label>
+                        <input type="file" name="invoice_attachment" class="form-control">
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-light" data-bs-dismiss="modal">Cancel</button>
+                    <button type="submit" class="btn btn-primary">Save Invoice</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
 <!-- Edit FY Monthly Schedule Modal -->
 <div class="modal fade" id="monthlyScheduleModal" tabindex="-1">
     <div class="modal-dialog modal-lg">
