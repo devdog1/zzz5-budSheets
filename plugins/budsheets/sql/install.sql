@@ -7,6 +7,14 @@ CREATE TABLE IF NOT EXISTS `plug_budsheets_lines_of_business` (
     `updated_at` DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
+CREATE TABLE IF NOT EXISTS `plug_budsheets_lob_users` (
+    `lob_id` INT NOT NULL,
+    `user_id` INT NOT NULL,
+    PRIMARY KEY (`lob_id`, `user_id`),
+    INDEX (`user_id`),
+    CONSTRAINT `fk_budsheets_lob_users_lob` FOREIGN KEY (`lob_id`) REFERENCES `plug_budsheets_lines_of_business`(`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
 CREATE TABLE IF NOT EXISTS `plug_budsheets_items` (
     `id` INT AUTO_INCREMENT PRIMARY KEY,
     `lob_id` INT NOT NULL,

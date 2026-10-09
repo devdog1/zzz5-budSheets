@@ -88,6 +88,12 @@ $pdb->query("CREATE TABLE plug_budsheets_lines_of_business (
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );");
 
+$pdb->query("CREATE TABLE plug_budsheets_lob_users (
+    lob_id INTEGER NOT NULL,
+    user_id INTEGER NOT NULL,
+    PRIMARY KEY (lob_id, user_id)
+);");
+
 $pdb->query("CREATE TABLE plug_budsheets_items (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     lob_id INTEGER NOT NULL,
@@ -142,22 +148,33 @@ echo "[TEST] Database tables initialized successfully.\n";
 // Load Plugin Entry File and Models
 require_once __DIR__ . '/../plugins/budsheets/plugin.php';
 
-// Test 1: Lines of Business CRUD
-echo "[TEST] Testing Lines of Business operations...\n";
-budsheets_add_lob('Information Technology', 'IT', 'IT Infrastructure and Software');
-budsheets_add_lob('Human Resources', 'HR', 'HR Services');
+// Test 1: Lines of Business CRUD & User Assignments
+echo "[TEST] Testing Lines of Business operations & user assignments...\n";
+budsheets_add_lob('Information Technology', 'IT', 'IT Infrastructure and Software', [10, 11]);
+budsheets_add_lob('Human Resources', 'HR', 'HR Services', [12]);
 
 $lobs = budsheets_get_lobs();
 assert(count($lobs) === 2, 'Should return 2 LOBs');
-assert($lobs[0]['name'] === 'Human Resources' || $lobs[1]['name'] === 'Human Resources', 'HR LOB exists');
 
-$itLob = budsheets_get_lob(1);
-assert($itLob['code'] === 'IT', 'IT LOB code is correct');
+$itUsers = budsheets_get_lob_users(1);
+assert(count($itUsers) === 2, 'IT LOB should have 2 assigned users');
+assert(in_array(10, $itUsers) && in_array(11, $itUsers), 'User 10 and 11 assigned to IT');
 
-budsheets_update_lob(1, 'InfoTech', 'IT-UPDATED', 'Updated description');
-$updatedLob = budsheets_get_lob(1);
-assert($updatedLob['name'] === 'InfoTech', 'LOB name updated');
-echo "  ✓ LOB CRUD tests passed.\n";
+// Test access filtering for non-admin user
+$user_permissions = ['budsheets_view']; // strip budsheets_admin
+$_SESSION['user_id'] = 12;
+$hrUserLobs = budsheets_get_lobs(12);
+assert(count($hrUserLobs) === 1, 'Non-admin user 12 should only see 1 assigned LOB');
+assert($hrUserLobs[0]['name'] === 'Human Resources', 'User 12 sees HR LOB');
+
+// Restore admin permissions
+$user_permissions = ['budsheets_view', 'budsheets_edit', 'budsheets_admin'];
+$_SESSION['user_id'] = 1;
+
+budsheets_update_lob(1, 'InfoTech', 'IT-UPDATED', 'Updated description', [10]);
+$updatedUsers = budsheets_get_lob_users(1);
+assert(count($updatedUsers) === 1 && $updatedUsers[0] == 10, 'IT LOB updated user assignment');
+echo "  ✓ LOB CRUD & User assignment tests passed.\n";
 
 // Test 2: Budget Item CRUD
 echo "[TEST] Testing Budget Item operations...\n";
@@ -231,6 +248,7 @@ assert(isset($registered_routes['budsheets_lobs']), 'Route budsheets_lobs is reg
 assert(isset($registered_routes['budsheets_items']), 'Route budsheets_items is registered');
 assert(isset($registered_routes['budsheets_item_detail']), 'Route budsheets_item_detail is registered');
 assert(isset($registered_routes['budsheets_download_file']), 'Route budsheets_download_file is registered');
+assert(isset($registered_routes['budsheets_export_csv']), 'Route budsheets_export_csv is registered');
 
 assert(isset($registered_filters['theme_nav_links']), 'theme_nav_links filter hook registered');
 assert(isset($registered_actions['index_dashboard_widgets']), 'index_dashboard_widgets action hook registered');

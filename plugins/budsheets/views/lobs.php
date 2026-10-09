@@ -13,6 +13,7 @@ if (!has_permission('budsheets_admin')) {
 
 $message = '';
 $error = '';
+$systemUsers = budsheets_get_all_system_users();
 
 // Handle Actions
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
@@ -25,11 +26,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $name = trim($_POST['name'] ?? '');
             $code = trim($_POST['code'] ?? '');
             $description = trim($_POST['description'] ?? '');
+            $assigned_users = $_POST['assigned_users'] ?? [];
 
             if (empty($name)) {
                 $error = 'Line of Business name is required.';
             } else {
-                if (budsheets_add_lob($name, $code, $description)) {
+                if (budsheets_add_lob($name, $code, $description, $assigned_users)) {
                     $message = 'Line of Business created successfully.';
                 } else {
                     $error = 'Failed to create Line of Business.';
@@ -40,11 +42,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $name = trim($_POST['name'] ?? '');
             $code = trim($_POST['code'] ?? '');
             $description = trim($_POST['description'] ?? '');
+            $assigned_users = $_POST['assigned_users'] ?? [];
 
             if (!$lob_id || empty($name)) {
                 $error = 'Invalid input for updating Line of Business.';
             } else {
-                if (budsheets_update_lob($lob_id, $name, $code, $description)) {
+                if (budsheets_update_lob($lob_id, $name, $code, $description, $assigned_users)) {
                     $message = 'Line of Business updated successfully.';
                 } else {
                     $error = 'Failed to update Line of Business.';
@@ -70,7 +73,7 @@ $lobs = budsheets_get_lobs();
     <div class="d-flex justify-content-between align-items-center mb-4">
         <div>
             <h2 class="fw-bold text-dark mb-1"><i class="fa-solid fa-sitemap me-2 text-primary"></i>Lines of Business</h2>
-            <p class="text-muted small mb-0">Manage organizational departments and business units for budget allocation.</p>
+            <p class="text-muted small mb-0">Manage organizational departments and configure specific user access permissions per Line of Business.</p>
         </div>
         <button type="button" class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#addLobModal">
             <i class="fa-solid fa-plus me-1"></i> Add Line of Business
@@ -101,6 +104,7 @@ $lobs = budsheets_get_lobs();
                             <th>Code</th>
                             <th>Name</th>
                             <th>Description</th>
+                            <th>Assigned Users</th>
                             <th>Created At</th>
                             <th class="text-end pe-3">Actions</th>
                         </tr>
@@ -108,15 +112,26 @@ $lobs = budsheets_get_lobs();
                     <tbody>
                         <?php if (empty($lobs)): ?>
                             <tr>
-                                <td colspan="6" class="text-center py-4 text-muted">No Lines of Business found. Click "Add Line of Business" to create one.</td>
+                                <td colspan="7" class="text-center py-4 text-muted">No Lines of Business found. Click "Add Line of Business" to create one.</td>
                             </tr>
                         <?php else: ?>
-                            <?php foreach ($lobs as $lob): ?>
+                            <?php foreach ($lobs as $lob):
+                                $assignedUids = budsheets_get_lob_users($lob['id']);
+                            ?>
                                 <tr>
                                     <td class="ps-3 fw-bold text-muted">#<?= (int)$lob['id'] ?></td>
                                     <td><span class="badge bg-secondary"><?= e($lob['code'] ?: 'N/A') ?></span></td>
                                     <td class="fw-semibold text-dark"><?= e($lob['name']) ?></td>
                                     <td class="text-muted small"><?= e($lob['description'] ?: '—') ?></td>
+                                    <td>
+                                        <?php if (empty($assignedUids)): ?>
+                                            <span class="badge bg-light text-muted border">All Admins / Open</span>
+                                        <?php else: ?>
+                                            <span class="badge bg-primary-subtle text-primary border border-primary-subtle">
+                                                <i class="fa-solid fa-users me-1"></i><?= count($assignedUids) ?> Assigned User(s)
+                                            </span>
+                                        <?php endif; ?>
+                                    </td>
                                     <td class="text-muted small"><?= e($lob['created_at']) ?></td>
                                     <td class="text-end pe-3">
                                         <button type="button" class="btn btn-sm btn-outline-secondary me-1"
@@ -158,8 +173,24 @@ $lobs = budsheets_get_lobs();
                                                     </div>
                                                     <div class="mb-3">
                                                         <label class="form-label fw-semibold">Description</label>
-                                                        <textarea name="description" class="form-control" rows="3"><?= e($lob['description']) ?></textarea>
+                                                        <textarea name="description" class="form-control" rows="2"><?= e($lob['description']) ?></textarea>
                                                     </div>
+                                                    <?php if (!empty($systemUsers)): ?>
+                                                        <div class="mb-3">
+                                                            <label class="form-label fw-semibold">Restrict Access to Specific Users</label>
+                                                            <div class="border rounded p-2" style="max-height: 150px; overflow-y: auto;">
+                                                                <?php foreach ($systemUsers as $u): ?>
+                                                                    <div class="form-check">
+                                                                        <input class="form-check-input" type="checkbox" name="assigned_users[]" value="<?= (int)$u['id'] ?>" id="edit_u_<?= (int)$lob['id'] ?>_<?= (int)$u['id'] ?>" <?= in_array($u['id'], $assignedUids) ? 'checked' : '' ?>>
+                                                                        <label class="form-check-label small" for="edit_u_<?= (int)$lob['id'] ?>_<?= (int)$u['id'] ?>">
+                                                                            <?= e($u['name']) ?> (<?= e($u['email']) ?>)
+                                                                        </label>
+                                                                    </div>
+                                                                <?php endforeach; ?>
+                                                            </div>
+                                                            <div class="form-text">Select users who are authorized to view and access this Line of Business.</div>
+                                                        </div>
+                                                    <?php endif; ?>
                                                 </div>
                                                 <div class="modal-footer">
                                                     <button type="button" class="btn btn-light" data-bs-dismiss="modal">Cancel</button>
@@ -200,8 +231,24 @@ $lobs = budsheets_get_lobs();
                     </div>
                     <div class="mb-3">
                         <label class="form-label fw-semibold">Description</label>
-                        <textarea name="description" class="form-control" rows="3" placeholder="Brief description of this business unit..."></textarea>
+                        <textarea name="description" class="form-control" rows="2" placeholder="Brief description of this business unit..."></textarea>
                     </div>
+                    <?php if (!empty($systemUsers)): ?>
+                        <div class="mb-3">
+                            <label class="form-label fw-semibold">Restrict Access to Specific Users</label>
+                            <div class="border rounded p-2" style="max-height: 150px; overflow-y: auto;">
+                                <?php foreach ($systemUsers as $u): ?>
+                                    <div class="form-check">
+                                        <input class="form-check-input" type="checkbox" name="assigned_users[]" value="<?= (int)$u['id'] ?>" id="add_u_<?= (int)$u['id'] ?>">
+                                        <label class="form-check-label small" for="add_u_<?= (int)$u['id'] ?>">
+                                            <?= e($u['name']) ?> (<?= e($u['email']) ?>)
+                                        </label>
+                                    </div>
+                                <?php endforeach; ?>
+                            </div>
+                            <div class="form-text">Select users who are authorized to view and access this Line of Business.</div>
+                        </div>
+                    <?php endif; ?>
                 </div>
                 <div class="modal-footer">
                     <button type="button" class="btn btn-light" data-bs-dismiss="modal">Cancel</button>

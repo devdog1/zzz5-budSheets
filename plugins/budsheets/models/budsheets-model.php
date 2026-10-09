@@ -41,11 +41,25 @@ function budsheets_upload_dir() {
 // Lines of Business (LOB) Operations
 // ==========================================
 
-function budsheets_get_lobs() {
+function budsheets_get_lobs($user_id = null) {
     $pdb = budsheets_db();
     if (!$pdb) return [];
     $table = $pdb->getTableName('lines_of_business');
-    return $pdb->query("SELECT * FROM {$table} ORDER BY name ASC")->fetchAll();
+    $userLobTable = $pdb->getTableName('lob_users');
+
+    // Admin users can see all LOBs
+    if (has_permission('budsheets_admin') || $user_id === null) {
+        return $pdb->query("SELECT * FROM {$table} ORDER BY name ASC")->fetchAll();
+    }
+
+    // Filter by assigned user LOBs
+    $currentUserId = $user_id ?: ($_SESSION['user_id'] ?? 0);
+    $sql = "SELECT l.*
+            FROM {$table} l
+            INNER JOIN {$userLobTable} lu ON l.id = lu.lob_id
+            WHERE lu.user_id = ?
+            ORDER BY l.name ASC";
+    return $pdb->query($sql, [(int)$currentUserId])->fetchAll();
 }
 
 function budsheets_get_lob($id) {
@@ -55,27 +69,38 @@ function budsheets_get_lob($id) {
     return $pdb->query("SELECT * FROM {$table} WHERE id = ?", [(int)$id])->fetch();
 }
 
-function budsheets_add_lob($name, $code = '', $description = '') {
+function budsheets_add_lob($name, $code = '', $description = '', $user_ids = []) {
     $pdb = budsheets_db();
     if (!$pdb) return false;
     $table = $pdb->getTableName('lines_of_business');
-    return $pdb->query("INSERT INTO {$table} (name, code, description) VALUES (?, ?, ?)", [
+    $pdb->query("INSERT INTO {$table} (name, code, description) VALUES (?, ?, ?)", [
         trim($name),
         trim($code),
         trim($description)
     ]);
+    $lob_id = $pdb->lastInsertId();
+
+    if ($lob_id && !empty($user_ids)) {
+        budsheets_set_lob_users($lob_id, $user_ids);
+    }
+    return $lob_id;
 }
 
-function budsheets_update_lob($id, $name, $code = '', $description = '') {
+function budsheets_update_lob($id, $name, $code = '', $description = '', $user_ids = null) {
     $pdb = budsheets_db();
     if (!$pdb) return false;
     $table = $pdb->getTableName('lines_of_business');
-    return $pdb->query("UPDATE {$table} SET name = ?, code = ?, description = ? WHERE id = ?", [
+    $res = $pdb->query("UPDATE {$table} SET name = ?, code = ?, description = ? WHERE id = ?", [
         trim($name),
         trim($code),
         trim($description),
         (int)$id
     ]);
+
+    if ($user_ids !== null) {
+        budsheets_set_lob_users($id, $user_ids);
+    }
+    return $res;
 }
 
 function budsheets_delete_lob($id) {
@@ -83,6 +108,48 @@ function budsheets_delete_lob($id) {
     if (!$pdb) return false;
     $table = $pdb->getTableName('lines_of_business');
     return $pdb->query("DELETE FROM {$table} WHERE id = ?", [(int)$id]);
+}
+
+// ==========================================
+// LOB User Access Assignments
+// ==========================================
+
+function budsheets_get_lob_users($lob_id) {
+    $pdb = budsheets_db();
+    if (!$pdb) return [];
+    $table = $pdb->getTableName('lob_users');
+    $rows = $pdb->query("SELECT user_id FROM {$table} WHERE lob_id = ?", [(int)$lob_id])->fetchAll();
+    return array_column($rows, 'user_id');
+}
+
+function budsheets_set_lob_users($lob_id, $user_ids = []) {
+    $pdb = budsheets_db();
+    if (!$pdb) return false;
+    $table = $pdb->getTableName('lob_users');
+
+    $pdb->query("DELETE FROM {$table} WHERE lob_id = ?", [(int)$lob_id]);
+
+    if (!empty($user_ids)) {
+        foreach ($user_ids as $uid) {
+            $pdb->query("INSERT INTO {$table} (lob_id, user_id) VALUES (?, ?)", [(int)$lob_id, (int)$uid]);
+        }
+    }
+    return true;
+}
+
+function budsheets_get_all_system_users() {
+    // Query framework users table if available
+    try {
+        if (class_exists('db') || function_exists('current_user')) {
+            $pdb = budsheets_db();
+            if ($pdb) {
+                return $pdb->query("SELECT id, name, email FROM users ORDER BY name ASC")->fetchAll();
+            }
+        }
+    } catch (Exception $e) {
+        // Fallback or empty if system users table not available
+    }
+    return [];
 }
 
 // ==========================================
@@ -94,15 +161,29 @@ function budsheets_get_items($lob_id = null) {
     if (!$pdb) return [];
     $itemsTable = $pdb->getTableName('items');
     $lobTable = $pdb->getTableName('lines_of_business');
+    $userLobTable = $pdb->getTableName('lob_users');
 
     $sql = "SELECT i.*, l.name as lob_name, l.code as lob_code
             FROM {$itemsTable} i
             LEFT JOIN {$lobTable} l ON i.lob_id = l.id";
     $params = [];
+    $where = [];
 
+    // Filter by specific requested LOB ID
     if ($lob_id) {
-        $sql .= " WHERE i.lob_id = ?";
+        $where[] = "i.lob_id = ?";
         $params[] = (int)$lob_id;
+    }
+
+    // Direct LOB User permission filter for non-admin users
+    if (!has_permission('budsheets_admin')) {
+        $currentUserId = $_SESSION['user_id'] ?? 0;
+        $where[] = "i.lob_id IN (SELECT lob_id FROM {$userLobTable} WHERE user_id = ?)";
+        $params[] = (int)$currentUserId;
+    }
+
+    if (!empty($where)) {
+        $sql .= " WHERE " . implode(" AND ", $where);
     }
 
     $sql .= " ORDER BY i.created_at DESC";
@@ -114,14 +195,21 @@ function budsheets_get_item($id) {
     if (!$pdb) return null;
     $itemsTable = $pdb->getTableName('items');
     $lobTable = $pdb->getTableName('lines_of_business');
+    $userLobTable = $pdb->getTableName('lob_users');
 
-    return $pdb->query(
-        "SELECT i.*, l.name as lob_name, l.code as lob_code
-         FROM {$itemsTable} i
-         LEFT JOIN {$lobTable} l ON i.lob_id = l.id
-         WHERE i.id = ?",
-        [(int)$id]
-    )->fetch();
+    $sql = "SELECT i.*, l.name as lob_name, l.code as lob_code
+            FROM {$itemsTable} i
+            LEFT JOIN {$lobTable} l ON i.lob_id = l.id
+            WHERE i.id = ?";
+    $params = [(int)$id];
+
+    if (!has_permission('budsheets_admin')) {
+        $currentUserId = $_SESSION['user_id'] ?? 0;
+        $sql .= " AND i.lob_id IN (SELECT lob_id FROM {$userLobTable} WHERE user_id = ?)";
+        $params[] = (int)$currentUserId;
+    }
+
+    return $pdb->query($sql, $params)->fetch();
 }
 
 function budsheets_save_item($data, $item_id = null) {
@@ -367,13 +455,19 @@ function budsheets_get_dashboard_summary() {
         return ['lob_count' => 0, 'item_count' => 0, 'total_invoiced' => 0];
     }
 
-    $lobTable = $pdb->getTableName('lines_of_business');
-    $itemsTable = $pdb->getTableName('items');
+    $lobs = budsheets_get_lobs();
+    $items = budsheets_get_items();
     $invTable = $pdb->getTableName('invoices');
 
-    $lobCount = (int)$pdb->query("SELECT COUNT(*) as c FROM {$lobTable}")->fetch()['c'];
-    $itemCount = (int)$pdb->query("SELECT COUNT(*) as c FROM {$itemsTable}")->fetch()['c'];
-    $totalInvoiced = (float)$pdb->query("SELECT SUM(amount_paid) as total FROM {$invTable}")->fetch()['total'];
+    $lobCount = count($lobs);
+    $itemCount = count($items);
+
+    $totalInvoiced = 0;
+    if (!empty($items)) {
+        $itemIds = array_column($items, 'id');
+        $placeholders = implode(',', array_fill(0, count($itemIds), '?'));
+        $totalInvoiced = (float)$pdb->query("SELECT SUM(amount_paid) as total FROM {$invTable} WHERE item_id IN ({$placeholders})", $itemIds)->fetch()['total'];
+    }
 
     return [
         'lob_count' => $lobCount,
