@@ -150,7 +150,7 @@ foreach ($allClasses as $c) {
                         </div>
 
                         <div class="col-md-3">
-                            <label class="form-label fw-semibold">Monthly Cost</label>
+                            <label class="form-label fw-semibold">Monthly Base Cost</label>
                             <div class="input-group">
                                 <span class="input-group-text">$</span>
                                 <input type="number" step="0.01" name="monthly_cost" class="form-control" value="<?= e($editItem['monthly_cost'] ?? '0.00') ?>" required>
@@ -252,7 +252,7 @@ foreach ($allClasses as $c) {
         <div class="d-flex justify-content-between align-items-center mb-4">
             <div>
                 <h2 class="fw-bold text-dark mb-1"><i class="fa-solid fa-file-invoice-dollar me-2 text-primary"></i>Operational Budget Items</h2>
-                <p class="text-muted small mb-0">Track vendors, products, contract lengths, recurring costs, and associated invoices.</p>
+                <p class="text-muted small mb-0">Track vendors, products, contract lengths, recurring costs, and associated invoices in <strong>CAD</strong>.</p>
             </div>
             <div>
                 <a href="<?= url_for('budsheets_export_csv') ?><?= $filterLob ? '&lob_id=' . $filterLob : '' ?>" class="btn btn-outline-success me-2">
@@ -300,7 +300,8 @@ foreach ($allClasses as $c) {
                                 <th class="ps-3">Line of Business</th>
                                 <th>Vendor / Product</th>
                                 <th>Class</th>
-                                <th>Monthly Cost</th>
+                                <th>Monthly Cost (Native)</th>
+                                <th>Monthly Total w/ Tax (CAD)</th>
                                 <th>Tax Type</th>
                                 <th>Invoice Type</th>
                                 <th>Contract Term</th>
@@ -310,10 +311,13 @@ foreach ($allClasses as $c) {
                         <tbody>
                             <?php if (empty($items)): ?>
                                 <tr>
-                                    <td colspan="8" class="text-center py-4 text-muted">No budget items found.</td>
+                                    <td colspan="9" class="text-center py-4 text-muted">No budget items found.</td>
                                 </tr>
                             <?php else: ?>
-                                <?php foreach ($items as $item): ?>
+                                <?php foreach ($items as $item):
+                                    $tax = budsheets_calculate_tax((float)$item['monthly_cost'], $item['tax_type']);
+                                    $monthlyCad = budsheets_convert_to_cad($tax['total'], $item['currency']);
+                                ?>
                                     <tr>
                                         <td class="ps-3">
                                             <span class="fw-semibold text-dark"><?= e($item['lob_name'] ?: 'Unassigned') ?></span>
@@ -323,8 +327,11 @@ foreach ($allClasses as $c) {
                                             <div class="small text-muted"><?= e($item['product']) ?></div>
                                         </td>
                                         <td><span class="badge bg-light text-dark border"><?= e($item['class'] ?: 'N/A') ?></span></td>
+                                        <td class="fw-semibold text-secondary">
+                                            $<?= number_format((float)$item['monthly_cost'], 2) ?> <small><?= e($item['currency']) ?></small>
+                                        </td>
                                         <td class="fw-bold text-success">
-                                            $<?= number_format((float)$item['monthly_cost'], 2) ?> <small class="text-muted"><?= e($item['currency']) ?></small>
+                                            $<?= number_format($monthlyCad, 2) ?> CAD
                                         </td>
                                         <td><span class="badge bg-info-subtle text-info-emphasis"><?= e($item['tax_type']) ?></span></td>
                                         <td>

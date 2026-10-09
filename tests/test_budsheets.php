@@ -11,6 +11,7 @@ $registered_routes = [];
 $registered_actions = [];
 $registered_filters = [];
 $user_permissions = ['budsheets_view', 'budsheets_edit', 'budsheets_admin'];
+$plugin_settings_store = [];
 
 function has_permission($perm) {
     global $user_permissions;
@@ -26,6 +27,17 @@ function url_for($route) {
 }
 
 function set_flash_message($type, $msg) {}
+
+function get_plugin_setting($slug, $key, $default = null) {
+    global $plugin_settings_store;
+    return $plugin_settings_store[$key] ?? $default;
+}
+
+function set_plugin_setting($slug, $key, $val) {
+    global $plugin_settings_store;
+    $plugin_settings_store[$key] = $val;
+    return true;
+}
 
 function add_filter($hook, $callback) {
     global $registered_filters;
@@ -184,7 +196,26 @@ $updatedUsers = budsheets_get_lob_users(1);
 assert(count($updatedUsers) === 1 && $updatedUsers[0] == 10, 'IT LOB updated user assignment');
 echo "  ✓ LOB CRUD & User assignment tests passed.\n";
 
-// Test 2: Expense Classes CRUD & LOB Assignment
+// Test 2: Tax & Currency Conversion Settings
+echo "[TEST] Testing tax and currency conversion logic...\n";
+budsheets_save_settings([
+    'gst_rate' => '5.0',
+    'pst_rate' => '7.0',
+    'rate_USD' => '1.35',
+    'rate_EUR' => '1.45',
+    'rate_CAD' => '1.0'
+]);
+
+$taxCalc = budsheets_calculate_tax(100.00, 'GSTandPST');
+assert($taxCalc['gst'] == 5.0, 'GST amount is $5.00');
+assert($taxCalc['pst'] == 7.0, 'PST amount is $7.00');
+assert($taxCalc['total'] == 112.00, 'Total with GST+PST is $112.00');
+
+$convertedCad = budsheets_convert_to_cad(100.00, 'USD');
+assert($convertedCad == 135.00, '$100 USD converts to $135.00 CAD at 1.35 rate');
+echo "  ✓ Tax and Currency conversion tests passed.\n";
+
+// Test 3: Expense Classes CRUD & LOB Assignment
 echo "[TEST] Testing Expense Classes operations & LOB associations...\n";
 $classId1 = budsheets_add_class(1, 'Software Subscriptions', 'SaaS and cloud software licenses');
 $classId2 = budsheets_add_class(1, 'Hardware Purchase', 'Servers and laptops');
@@ -199,7 +230,7 @@ $allClasses = budsheets_get_all_classes();
 assert(count($allClasses) === 3, 'All classes count is 3');
 echo "  ✓ Expense Classes tests passed.\n";
 
-// Test 3: File Extension Whitelisting
+// Test 4: File Extension Whitelisting
 echo "[TEST] Testing file extension whitelisting...\n";
 assert(budsheets_is_allowed_extension('contract.pdf') === true, 'PDF extension allowed');
 assert(budsheets_is_allowed_extension('invoice.png') === true, 'PNG extension allowed');
@@ -208,14 +239,14 @@ assert(budsheets_is_allowed_extension('script.phtml') === false, 'phtml extensio
 assert(budsheets_is_allowed_extension('malware.exe') === false, 'exe extension blocked');
 echo "  ✓ File extension security check tests passed.\n";
 
-// Test 4: Budget Item CRUD
+// Test 5: Budget Item CRUD
 echo "[TEST] Testing Budget Item operations...\n";
 $itemData = [
     'lob_id'              => 1,
     'vendor'              => 'Microsoft',
     'product'             => 'Azure Cloud Services',
     'currency'            => 'USD',
-    'monthly_cost'        => '1250.50',
+    'monthly_cost'        => '1000.00',
     'tax_type'            => 'GSTandPST',
     'class'               => 'Cloud & SaaS Subscriptions',
     'description'         => 'Monthly cloud consumption',
@@ -231,18 +262,18 @@ assert($itemId > 0, 'Item should be saved and return valid ID');
 
 $item = budsheets_get_item($itemId);
 assert($item['vendor'] === 'Microsoft', 'Vendor is Microsoft');
-assert($item['monthly_cost'] == 1250.50, 'Monthly cost matches');
+assert($item['monthly_cost'] == 1000.00, 'Monthly cost matches');
 assert($item['class'] === 'Cloud & SaaS Subscriptions', 'Assigned class matches');
 assert($item['tax_type'] === 'GSTandPST', 'Tax type matches');
 assert($item['invoice_type'] === 'monthly', 'Invoice type matches');
 echo "  ✓ Budget Item CRUD tests passed.\n";
 
-// Test 5: Invoices CRUD against Item
-echo "[TEST] Testing Invoices operations...\n";
+// Test 6: Invoices CRUD & CAD Conversion Summary
+echo "[TEST] Testing Invoices operations and CAD summary totals...\n";
 $invData1 = [
     'item_id'        => $itemId,
     'invoice_number' => 'INV-2026-001',
-    'amount_paid'    => '1250.50',
+    'amount_paid'    => '1000.00',
     'currency'       => 'USD',
     'period_type'    => 'monthly',
     'period_year'    => '2026',
@@ -256,7 +287,7 @@ $invId1 = budsheets_save_invoice($invData1);
 $invData2 = [
     'item_id'        => $itemId,
     'invoice_number' => 'INV-2026-002',
-    'amount_paid'    => '1250.50',
+    'amount_paid'    => '1000.00',
     'currency'       => 'USD',
     'period_type'    => 'monthly',
     'period_year'    => '2026',
@@ -271,10 +302,10 @@ $invoices = budsheets_get_invoices($itemId);
 assert(count($invoices) === 2, 'Item should have 2 invoices');
 
 $summary = budsheets_get_dashboard_summary();
-assert($summary['total_invoiced'] == 2501.00, 'Total invoiced sum is correct');
-echo "  ✓ Invoices CRUD tests passed.\n";
+assert($summary['total_invoiced_cad'] == 2700.00, 'Total invoiced sum in CAD ($2000 USD * 1.35) is $2700.00 CAD');
+echo "  ✓ Invoices CRUD & CAD summary tests passed.\n";
 
-// Test 6: Dynamic Routes & Hooks Verification
+// Test 7: Dynamic Routes & Hooks Verification
 echo "[TEST] Verifying plugin hooks and registered routes...\n";
 assert(isset($registered_routes['budsheets_dashboard']), 'Route budsheets_dashboard is registered');
 assert(isset($registered_routes['budsheets_lobs']), 'Route budsheets_lobs is registered');

@@ -85,9 +85,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 $contracts = budsheets_get_contract_files($itemId);
 $invoices = budsheets_get_invoices($itemId);
 
-$totalInvoicedItem = 0;
+$taxCalc = budsheets_calculate_tax((float)$item['monthly_cost'], $item['tax_type']);
+$monthlyCad = budsheets_convert_to_cad($taxCalc['total'], $item['currency']);
+
+$totalInvoicedCad = 0.0;
 foreach ($invoices as $inv) {
-    $totalInvoicedItem += (float)$inv['amount_paid'];
+    $totalInvoicedCad += budsheets_convert_to_cad($inv['amount_paid'], $inv['currency']);
 }
 ?>
 
@@ -130,18 +133,28 @@ foreach ($invoices as $inv) {
         <div class="col-lg-8">
             <div class="card border-0 shadow-sm h-100">
                 <div class="card-header bg-white py-3">
-                    <h5 class="fw-bold mb-0 text-dark"><i class="fa-solid fa-circle-info me-2 text-primary"></i>Item & Contract Specifications</h5>
+                    <h5 class="fw-bold mb-0 text-dark"><i class="fa-solid fa-circle-info me-2 text-primary"></i>Item Specifications & Cost Breakdown (CAD)</h5>
                 </div>
                 <div class="card-body">
                     <div class="row g-3">
                         <div class="col-md-4">
-                            <div class="small text-muted">Monthly Cost</div>
-                            <div class="fs-5 fw-bold text-success">$<?= number_format((float)$item['monthly_cost'], 2) ?> <small><?= e($item['currency']) ?></small></div>
+                            <div class="small text-muted">Monthly Base Cost</div>
+                            <div class="fs-5 fw-bold text-dark">$<?= number_format((float)$item['monthly_cost'], 2) ?> <small><?= e($item['currency']) ?></small></div>
                         </div>
 
                         <div class="col-md-4">
-                            <div class="small text-muted">Tax Type</div>
-                            <div class="fs-6 fw-semibold text-dark"><span class="badge bg-info-subtle text-info-emphasis"><?= e($item['tax_type']) ?></span></div>
+                            <div class="small text-muted">Monthly Total w/ Tax (CAD)</div>
+                            <div class="fs-5 fw-bold text-success">$<?= number_format($monthlyCad, 2) ?> CAD</div>
+                        </div>
+
+                        <div class="col-md-4">
+                            <div class="small text-muted">Tax Type & Calculated Taxes</div>
+                            <div class="fs-6 fw-semibold text-dark mb-1">
+                                <span class="badge bg-info-subtle text-info-emphasis me-1"><?= e($item['tax_type']) ?></span>
+                            </div>
+                            <div class="small text-muted">
+                                GST: $<?= number_format($taxCalc['gst'], 2) ?> | PST: $<?= number_format($taxCalc['pst'], 2) ?>
+                            </div>
                         </div>
 
                         <div class="col-md-4">
@@ -233,7 +246,7 @@ foreach ($invoices as $inv) {
         <div class="card-header bg-white py-3 d-flex justify-content-between align-items-center">
             <div>
                 <h5 class="fw-bold mb-0 text-dark"><i class="fa-solid fa-receipt me-2 text-primary"></i>Invoices Paid Against Item</h5>
-                <span class="small text-muted">Total Invoiced: <strong>$<?= number_format($totalInvoicedItem, 2) ?></strong></span>
+                <span class="small text-muted">Total Invoiced: <strong>$<?= number_format($totalInvoicedCad, 2) ?> CAD</strong></span>
             </div>
             <?php if (has_permission('budsheets_edit')): ?>
                 <button type="button" class="btn btn-primary btn-sm" data-bs-toggle="modal" data-bs-target="#addInvoiceModal">
@@ -249,7 +262,8 @@ foreach ($invoices as $inv) {
                             <th class="ps-3">Invoice #</th>
                             <th>Period</th>
                             <th>Payment Date</th>
-                            <th>Amount Paid</th>
+                            <th>Amount Paid (Native)</th>
+                            <th>Amount Paid (CAD)</th>
                             <th>Attachment</th>
                             <th>Comments</th>
                             <th class="text-end pe-3">Actions</th>
@@ -258,10 +272,12 @@ foreach ($invoices as $inv) {
                     <tbody>
                         <?php if (empty($invoices)): ?>
                             <tr>
-                                <td colspan="7" class="text-center py-4 text-muted">No invoices logged for this item yet.</td>
+                                <td colspan="8" class="text-center py-4 text-muted">No invoices logged for this item yet.</td>
                             </tr>
                         <?php else: ?>
-                            <?php foreach ($invoices as $inv): ?>
+                            <?php foreach ($invoices as $inv):
+                                $invCad = budsheets_convert_to_cad($inv['amount_paid'], $inv['currency']);
+                            ?>
                                 <tr>
                                     <td class="ps-3 fw-bold text-dark"><?= e($inv['invoice_number'] ?: 'N/A') ?></td>
                                     <td>
@@ -274,7 +290,8 @@ foreach ($invoices as $inv) {
                                         </span>
                                     </td>
                                     <td class="small text-muted"><?= e($inv['payment_date'] ?: 'N/A') ?></td>
-                                    <td class="fw-bold text-success">$<?= number_format((float)$inv['amount_paid'], 2) ?> <small><?= e($inv['currency']) ?></small></td>
+                                    <td class="fw-semibold text-secondary">$<?= number_format((float)$inv['amount_paid'], 2) ?> <small><?= e($inv['currency']) ?></small></td>
+                                    <td class="fw-bold text-success">$<?= number_format($invCad, 2) ?> CAD</td>
                                     <td>
                                         <?php if ($inv['attachment_original_name']): ?>
                                             <a href="<?= url_for('budsheets_download_file') ?>&file_type=invoice&file_id=<?= (int)$inv['id'] ?>" class="badge bg-secondary text-decoration-none">

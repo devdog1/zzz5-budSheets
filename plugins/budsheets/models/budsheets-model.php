@@ -90,6 +90,85 @@ function budsheets_is_allowed_extension($filename) {
 }
 
 // ==========================================
+// Tax & Currency Exchange Settings Operations
+// ==========================================
+
+function budsheets_get_settings() {
+    $defaultSettings = [
+        'gst_rate' => 5.0,
+        'pst_rate' => 7.0,
+        'rate_CAD' => 1.0,
+        'rate_USD' => 1.35,
+        'rate_EUR' => 1.45,
+        'rate_GBP' => 1.70,
+        'rate_AUD' => 0.90
+    ];
+
+    $settings = [];
+    foreach ($defaultSettings as $key => $default) {
+        if (function_exists('get_plugin_setting')) {
+            $settings[$key] = (float)get_plugin_setting('budsheets', $key, $default);
+        } else {
+            $settings[$key] = $default;
+        }
+    }
+    return $settings;
+}
+
+function budsheets_save_settings($data) {
+    if (!function_exists('set_plugin_setting')) return false;
+
+    $fields = ['gst_rate', 'pst_rate', 'rate_CAD', 'rate_USD', 'rate_EUR', 'rate_GBP', 'rate_AUD'];
+    foreach ($fields as $f) {
+        if (isset($data[$f])) {
+            set_plugin_setting('budsheets', $f, (float)$data[$f]);
+        }
+    }
+    return true;
+}
+
+/**
+ * Convert any currency amount to CAD based on settings
+ */
+function budsheets_convert_to_cad($amount, $currency = 'CAD') {
+    $settings = budsheets_get_settings();
+    $curr = strtoupper(trim($currency ?: 'CAD'));
+    $rateKey = 'rate_' . $curr;
+    $rate = $settings[$rateKey] ?? 1.0;
+    return (float)$amount * (float)$rate;
+}
+
+/**
+ * Calculate tax breakdown for an item in its native currency
+ */
+function budsheets_calculate_tax($amount, $taxType) {
+    $settings = budsheets_get_settings();
+    $gstRate = $settings['gst_rate'] / 100.0;
+    $pstRate = $settings['pst_rate'] / 100.0;
+
+    $gstAmount = 0.0;
+    $pstAmount = 0.0;
+
+    if ($taxType === 'GSTandPST') {
+        $gstAmount = $amount * $gstRate;
+        $pstAmount = $amount * $pstRate;
+    } elseif ($taxType === 'GST only') {
+        $gstAmount = $amount * $gstRate;
+    } elseif ($taxType === 'PST only') {
+        $pstAmount = $amount * $pstRate;
+    }
+
+    $totalWithTax = $amount + $gstAmount + $pstAmount;
+
+    return [
+        'base' => $amount,
+        'gst' => $gstAmount,
+        'pst' => $pstAmount,
+        'total' => $totalWithTax
+    ];
+}
+
+// ==========================================
 // Lines of Business (LOB) Operations
 // ==========================================
 
@@ -607,13 +686,13 @@ function budsheets_delete_invoice($invoice_id) {
 }
 
 // ==========================================
-// Dashboard & Summary Helper
+// Dashboard & Summary Helper (All CAD)
 // ==========================================
 
 function budsheets_get_dashboard_summary() {
     $pdb = budsheets_db();
     if (!$pdb) {
-        return ['lob_count' => 0, 'item_count' => 0, 'total_invoiced' => 0];
+        return ['lob_count' => 0, 'item_count' => 0, 'total_invoiced_cad' => 0, 'monthly_cost_cad' => 0, 'annual_cost_cad' => 0];
     }
 
     $lobs = budsheets_get_lobs();
@@ -623,17 +702,28 @@ function budsheets_get_dashboard_summary() {
     $lobCount = count($lobs);
     $itemCount = count($items);
 
-    $totalInvoiced = 0;
+    $totalInvoicedCad = 0.0;
     if (!empty($items)) {
         $itemIds = array_column($items, 'id');
         $placeholders = implode(',', array_fill(0, count($itemIds), '?'));
-        $totalInvoiced = (float)$pdb->query("SELECT SUM(amount_paid) as total FROM {$invTable} WHERE item_id IN ({$placeholders})", $itemIds)->fetch()['total'];
+        $invoices = $pdb->query("SELECT amount_paid, currency FROM {$invTable} WHERE item_id IN ({$placeholders})", $itemIds)->fetchAll();
+        foreach ($invoices as $inv) {
+            $totalInvoicedCad += budsheets_convert_to_cad($inv['amount_paid'], $inv['currency']);
+        }
+    }
+
+    $monthlyCostCad = 0.0;
+    foreach ($items as $item) {
+        $mTax = budsheets_calculate_tax((float)$item['monthly_cost'], $item['tax_type']);
+        $monthlyCostCad += budsheets_convert_to_cad($mTax['total'], $item['currency']);
     }
 
     return [
         'lob_count' => $lobCount,
         'item_count' => $itemCount,
-        'total_invoiced' => $totalInvoiced
+        'total_invoiced_cad' => $totalInvoicedCad,
+        'monthly_cost_cad' => $monthlyCostCad,
+        'annual_cost_cad' => $monthlyCostCad * 12
     ];
 }
 
@@ -710,7 +800,9 @@ function budsheets_export_items_csv() {
         'Product',
         'Class',
         'Currency',
-        'Monthly Cost',
+        'Monthly Cost (Native)',
+        'Monthly Total w/ Tax (CAD)',
+        'Annual Total w/ Tax (CAD)',
         'Tax Type',
         'Invoice Schedule',
         'Invoice Date',
@@ -720,6 +812,8 @@ function budsheets_export_items_csv() {
     ]);
 
     foreach ($items as $item) {
+        $tax = budsheets_calculate_tax((float)$item['monthly_cost'], $item['tax_type']);
+        $monthlyCad = budsheets_convert_to_cad($tax['total'], $item['currency']);
         fputcsv($output, [
             $item['id'],
             $item['lob_name'],
@@ -728,6 +822,8 @@ function budsheets_export_items_csv() {
             $item['class'],
             $item['currency'],
             $item['monthly_cost'],
+            number_format($monthlyCad, 2, '.', ''),
+            number_format($monthlyCad * 12, 2, '.', ''),
             $item['tax_type'],
             $item['invoice_type'],
             $item['invoice_date'],

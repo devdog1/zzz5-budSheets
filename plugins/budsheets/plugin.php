@@ -15,6 +15,50 @@ if (!defined('APP_ROOT')) {
 // Require Helper / Model logic
 require_once __DIR__ . '/models/budsheets-model.php';
 
+// Plugin Activation Lifecycle Hook (Executes install.sql)
+add_action('plugin_activate_budsheets', function() {
+    $sqlFile = __DIR__ . '/sql/install.sql';
+    if (file_exists($sqlFile)) {
+        try {
+            $pdb = budsheets_db();
+            if ($pdb) {
+                $sqlContent = file_get_contents($sqlFile);
+                $statements = array_filter(array_map('trim', explode(';', $sqlContent)));
+                foreach ($statements as $stmt) {
+                    if (!empty($stmt)) {
+                        $pdb->query($stmt);
+                    }
+                }
+            }
+        } catch (Throwable $t) {
+            error_log("Failed to run BudSheets activation install.sql: " . $t->getMessage());
+        }
+    }
+});
+
+// Plugin Deactivation Lifecycle Hook (Executes uninstall.sql if purge_tables is true)
+add_action('plugin_deactivate_budsheets', function($purge_tables = false) {
+    if ($purge_tables) {
+        $sqlFile = __DIR__ . '/sql/uninstall.sql';
+        if (file_exists($sqlFile)) {
+            try {
+                $pdb = budsheets_db();
+                if ($pdb) {
+                    $sqlContent = file_get_contents($sqlFile);
+                    $statements = array_filter(array_map('trim', explode(';', $sqlContent)));
+                    foreach ($statements as $stmt) {
+                        if (!empty($stmt)) {
+                            $pdb->query($stmt);
+                        }
+                    }
+                }
+            } catch (Throwable $t) {
+                error_log("Failed to run BudSheets deactivation uninstall.sql: " . $t->getMessage());
+            }
+        }
+    }
+});
+
 // Navigation Hook
 add_filter('theme_nav_links', function ($links) {
     if (!has_permission('budsheets_view')) {
@@ -68,7 +112,7 @@ add_action('index_dashboard_widgets', function ($userContext) {
                 </div>
                 <div class="col-4">
                     <div class="small text-muted">Total Invoiced</div>
-                    <div class="fs-4 fw-bold text-primary">$<?= number_format((float)$summary['total_invoiced'], 2) ?></div>
+                    <div class="fs-4 fw-bold text-primary">$<?= number_format((float)$summary['total_invoiced_cad'], 2) ?> CAD</div>
                 </div>
             </div>
         </div>

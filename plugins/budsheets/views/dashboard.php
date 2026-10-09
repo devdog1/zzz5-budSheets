@@ -1,6 +1,6 @@
 <?php
 /**
- * BudSheets Dashboard Overview
+ * BudSheets Dashboard Overview (All Amounts in CAD)
  */
 
 if (!defined('APP_ROOT')) {
@@ -14,40 +14,13 @@ if (!has_permission('budsheets_view')) {
 $lobs = budsheets_get_lobs();
 $items = budsheets_get_items();
 $summary = budsheets_get_dashboard_summary();
-
-// Calculate cost aggregates
-$totalMonthlyCost = 0;
-$totalAnnualCost = 0;
-$currencyTotals = [];
-
-foreach ($items as $item) {
-    $mCost = (float)$item['monthly_cost'];
-    $curr = $item['currency'] ?: 'USD';
-
-    if (!isset($currencyTotals[$curr])) {
-        $currencyTotals[$curr] = ['monthly' => 0, 'annual' => 0];
-    }
-
-    $currencyTotals[$curr]['monthly'] += $mCost;
-
-    if ($item['invoice_type'] === 'year') {
-        $currencyTotals[$curr]['annual'] += ($mCost * 12);
-    } else {
-        $currencyTotals[$curr]['annual'] += ($mCost * 12);
-    }
-
-    if ($curr === 'USD') {
-        $totalMonthlyCost += $mCost;
-        $totalAnnualCost += ($mCost * 12);
-    }
-}
 ?>
 
 <div class="container-fluid py-4">
     <div class="d-flex justify-content-between align-items-center mb-4">
         <div>
             <h2 class="fw-bold text-dark mb-1"><i class="fa-solid fa-calculator me-2 text-primary"></i>Operational Budgets Dashboard</h2>
-            <p class="text-muted small mb-0">Overview of organizational lines of business, recurring operational expenses, and invoices.</p>
+            <p class="text-muted small mb-0">Overview of organizational lines of business, recurring operational expenses, and invoices in <strong>CAD</strong>.</p>
         </div>
         <div>
             <?php if (has_permission('budsheets_edit')): ?>
@@ -56,6 +29,9 @@ foreach ($items as $item) {
                 </a>
             <?php endif; ?>
             <?php if (has_permission('budsheets_admin')): ?>
+                <a href="<?= url_for('budsheets_settings') ?>" class="btn btn-outline-secondary me-2">
+                    <i class="fa-solid fa-gear me-1"></i> Settings
+                </a>
                 <a href="<?= url_for('budsheets_lobs') ?>" class="btn btn-outline-secondary">
                     <i class="fa-solid fa-sitemap me-1"></i> Lines of Business
                 </a>
@@ -63,7 +39,7 @@ foreach ($items as $item) {
         </div>
     </div>
 
-    <!-- Summary KPI Cards -->
+    <!-- Summary KPI Cards (All in CAD) -->
     <div class="row g-3 mb-4">
         <div class="col-md-3">
             <div class="card border-0 shadow-sm rounded-3">
@@ -74,7 +50,7 @@ foreach ($items as $item) {
                         </div>
                         <div>
                             <div class="text-muted small fw-semibold text-uppercase">Lines of Business</div>
-                            <div class="fs-3 fw-bold text-dark"><?= count($lobs) ?></div>
+                            <div class="fs-3 fw-bold text-dark"><?= (int)$summary['lob_count'] ?></div>
                         </div>
                     </div>
                 </div>
@@ -90,7 +66,7 @@ foreach ($items as $item) {
                         </div>
                         <div>
                             <div class="text-muted small fw-semibold text-uppercase">Budget Items</div>
-                            <div class="fs-3 fw-bold text-dark"><?= count($items) ?></div>
+                            <div class="fs-3 fw-bold text-dark"><?= (int)$summary['item_count'] ?></div>
                         </div>
                     </div>
                 </div>
@@ -105,8 +81,8 @@ foreach ($items as $item) {
                             <i class="fa-solid fa-calendar-days fa-xl"></i>
                         </div>
                         <div>
-                            <div class="text-muted small fw-semibold text-uppercase">Est. Monthly Cost (USD)</div>
-                            <div class="fs-3 fw-bold text-dark">$<?= number_format($totalMonthlyCost, 2) ?></div>
+                            <div class="text-muted small fw-semibold text-uppercase">Monthly Total w/ Tax (CAD)</div>
+                            <div class="fs-3 fw-bold text-dark">$<?= number_format((float)$summary['monthly_cost_cad'], 2) ?></div>
                         </div>
                     </div>
                 </div>
@@ -121,8 +97,8 @@ foreach ($items as $item) {
                             <i class="fa-solid fa-receipt fa-xl"></i>
                         </div>
                         <div>
-                            <div class="text-muted small fw-semibold text-uppercase">Total Invoiced</div>
-                            <div class="fs-3 fw-bold text-success">$<?= number_format($summary['total_invoiced'], 2) ?></div>
+                            <div class="text-muted small fw-semibold text-uppercase">Total Invoiced (CAD)</div>
+                            <div class="fs-3 fw-bold text-success">$<?= number_format((float)$summary['total_invoiced_cad'], 2) ?></div>
                         </div>
                     </div>
                 </div>
@@ -133,7 +109,7 @@ foreach ($items as $item) {
     <!-- Line of Business Breakdown Table -->
     <div class="card border-0 shadow-sm mb-4">
         <div class="card-header bg-white py-3">
-            <h5 class="fw-bold mb-0 text-dark"><i class="fa-solid fa-layer-group me-2 text-secondary"></i>Line of Business Budget Allocation</h5>
+            <h5 class="fw-bold mb-0 text-dark"><i class="fa-solid fa-layer-group me-2 text-secondary"></i>Line of Business Budget Allocation (All converted to CAD)</h5>
         </div>
         <div class="card-body p-0">
             <div class="table-responsive">
@@ -143,30 +119,35 @@ foreach ($items as $item) {
                             <th class="ps-3">Line of Business</th>
                             <th>Code</th>
                             <th class="text-center">Assigned Items</th>
-                            <th>Monthly Est. Cost</th>
-                            <th>Annual Est. Cost</th>
+                            <th>Monthly Base Cost (CAD)</th>
+                            <th>Monthly w/ Tax (CAD)</th>
+                            <th>Annual Total w/ Tax (CAD)</th>
                             <th class="text-end pe-3">Action</th>
                         </tr>
                     </thead>
                     <tbody>
                         <?php if (empty($lobs)): ?>
                             <tr>
-                                <td colspan="6" class="text-center py-4 text-muted">No Lines of Business defined yet.</td>
+                                <td colspan="7" class="text-center py-4 text-muted">No Lines of Business defined yet.</td>
                             </tr>
                         <?php else: ?>
                             <?php foreach ($lobs as $lob):
                                 $lobItems = array_filter($items, function($i) use ($lob) { return $i['lob_id'] == $lob['id']; });
-                                $lobMonthly = 0;
+                                $lobMonthlyBaseCad = 0.0;
+                                $lobMonthlyTotalCad = 0.0;
                                 foreach ($lobItems as $li) {
-                                    $lobMonthly += (float)$li['monthly_cost'];
+                                    $tax = budsheets_calculate_tax((float)$li['monthly_cost'], $li['tax_type']);
+                                    $lobMonthlyBaseCad += budsheets_convert_to_cad($tax['base'], $li['currency']);
+                                    $lobMonthlyTotalCad += budsheets_convert_to_cad($tax['total'], $li['currency']);
                                 }
                             ?>
                                 <tr>
                                     <td class="ps-3 fw-semibold text-dark"><?= e($lob['name']) ?></td>
                                     <td><span class="badge bg-secondary"><?= e($lob['code'] ?: 'N/A') ?></span></td>
                                     <td class="text-center fw-bold"><?= count($lobItems) ?></td>
-                                    <td class="fw-semibold">$<?= number_format($lobMonthly, 2) ?></td>
-                                    <td class="text-muted">$<?= number_format($lobMonthly * 12, 2) ?></td>
+                                    <td class="fw-semibold">$<?= number_format($lobMonthlyBaseCad, 2) ?> CAD</td>
+                                    <td class="fw-bold text-success">$<?= number_format($lobMonthlyTotalCad, 2) ?> CAD</td>
+                                    <td class="text-dark fw-bold">$<?= number_format($lobMonthlyTotalCad * 12, 2) ?> CAD</td>
                                     <td class="text-end pe-3">
                                         <a href="<?= url_for('budsheets_items') ?>&lob_id=<?= (int)$lob['id'] ?>" class="btn btn-sm btn-outline-primary">
                                             <i class="fa-solid fa-eye me-1"></i> View Items
