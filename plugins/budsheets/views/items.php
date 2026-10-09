@@ -76,6 +76,12 @@ $lobClassesMap = [];
 foreach ($allClasses as $c) {
     $lobClassesMap[$c['lob_id']][] = $c['name'];
 }
+
+$monthsNames = [
+    1 => 'January', 2 => 'February', 3 => 'March', 4 => 'April',
+    5 => 'May', 6 => 'June', 7 => 'July', 8 => 'August',
+    9 => 'September', 10 => 'October', 11 => 'November', 12 => 'December'
+];
 ?>
 
 <div class="container-fluid py-4">
@@ -151,9 +157,19 @@ foreach ($allClasses as $c) {
 
                         <div class="col-md-3">
                             <label class="form-label fw-semibold">Billing Frequency</label>
-                            <select name="billing_frequency" id="billing_frequency" class="form-select" onchange="calculateAmounts()">
+                            <select name="billing_frequency" id="billing_frequency" class="form-select" onchange="calculateAmounts(); toggleInvoiceMonth();">
                                 <option value="monthly" <?= ($editItem['billing_frequency'] ?? 'monthly') === 'monthly' ? 'selected' : '' ?>>Monthly</option>
                                 <option value="yearly" <?= ($editItem['billing_frequency'] ?? '') === 'yearly' ? 'selected' : '' ?>>Full Year / Annual</option>
+                            </select>
+                        </div>
+
+                        <div class="col-md-3" id="invoice_month_wrapper" style="display: none;">
+                            <label class="form-label fw-semibold">Vendor Invoice Month</label>
+                            <select name="invoice_month" id="invoice_month" class="form-select">
+                                <option value="">-- Select Month --</option>
+                                <?php foreach ($monthsNames as $mNum => $mName): ?>
+                                    <option value="<?= $mNum ?>" <?= ($editItem['invoice_month'] ?? '') == $mNum ? 'selected' : '' ?>><?= $mName ?></option>
+                                <?php endforeach; ?>
                             </select>
                         </div>
 
@@ -268,6 +284,16 @@ foreach ($allClasses as $c) {
                 }
             }
 
+            function toggleInvoiceMonth() {
+                const freq = document.getElementById('billing_frequency').value;
+                const wrapper = document.getElementById('invoice_month_wrapper');
+                if (freq === 'yearly') {
+                    wrapper.style.display = 'block';
+                } else {
+                    wrapper.style.display = 'none';
+                }
+            }
+
             function calculateAmounts() {
                 const freq = document.getElementById('billing_frequency').value;
                 const cost = parseFloat(document.getElementById('monthly_cost').value) || 0;
@@ -284,6 +310,7 @@ foreach ($allClasses as $c) {
 
             document.addEventListener('DOMContentLoaded', function() {
                 updateClassOptions();
+                toggleInvoiceMonth();
                 calculateAmounts();
             });
         </script>
@@ -296,9 +323,9 @@ foreach ($allClasses as $c) {
                 <p class="text-muted small mb-0">Track vendors, products, contract lengths, recurring costs, and associated invoices in <strong>CAD</strong>.</p>
             </div>
             <div>
-                <a href="<?= url_for('budsheets_export_csv') ?><?= $filterLob ? '&lob_id=' . $filterLob : '' ?>" class="btn btn-outline-success me-2">
-                    <i class="fa-solid fa-file-csv me-1"></i> Export CSV
-                </a>
+                <button type="button" class="btn btn-outline-success me-2" data-bs-toggle="modal" data-bs-target="#exportCsvModal">
+                    <i class="fa-solid fa-file-csv me-1"></i> Export Financial Year CSV
+                </button>
                 <?php if (has_permission('budsheets_edit')): ?>
                     <a href="<?= url_for('budsheets_items') ?>&action=new<?= $filterLob ? '&lob_id=' . $filterLob : '' ?>" class="btn btn-primary">
                         <i class="fa-solid fa-plus me-1"></i> Add Budget Item
@@ -419,5 +446,47 @@ foreach ($allClasses as $c) {
                 </div>
             </div>
         </div>
+
+        <!-- Export CSV Modal -->
+        <div class="modal fade" id="exportCsvModal" tabindex="-1">
+            <div class="modal-dialog">
+                <div class="modal-content">
+                    <form method="GET">
+                        <input type="hidden" name="route" value="budsheets_export_csv">
+                        <div class="modal-header">
+                            <h5 class="modal-title fw-bold"><i class="fa-solid fa-file-csv me-2 text-success"></i>Export Financial Year CSV</h5>
+                            <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                        </div>
+                        <div class="modal-body">
+                            <div class="mb-3">
+                                <label class="form-label fw-semibold">Line of Business</label>
+                                <select name="lob_id" class="form-select">
+                                    <option value="">-- All Lines of Business --</option>
+                                    <?php foreach ($lobs as $lob): ?>
+                                        <option value="<?= (int)$lob['id'] ?>" <?= $filterLob == $lob['id'] ? 'selected' : '' ?>><?= e($lob['name']) ?></option>
+                                    <?php endforeach; ?>
+                                </select>
+                            </div>
+                            <div class="mb-3">
+                                <label class="form-label fw-semibold">Financial Year</label>
+                                <select name="fy" class="form-select">
+                                    <?php
+                                    $currFy = budsheets_get_fiscal_year();
+                                    for ($y = $currFy - 3; $y <= $currFy + 3; $y++):
+                                    ?>
+                                        <option value="<?= $y ?>" <?= $y === $currFy ? 'selected' : '' ?>>FY<?= $y ?></option>
+                                    <?php endfor; ?>
+                                </select>
+                            </div>
+                        </div>
+                        <div class="modal-footer">
+                            <button type="button" class="btn btn-light" data-bs-dismiss="modal">Cancel</button>
+                            <button type="submit" class="btn btn-success"><i class="fa-solid fa-download me-1"></i> Export CSV</button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+
     <?php endif; ?>
 </div>

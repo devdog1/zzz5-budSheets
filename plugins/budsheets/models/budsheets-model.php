@@ -65,6 +65,19 @@ function budsheets_ensure_tables_exist($pdb) {
         }
     }
 
+    // Auto-migrate invoice_month column if missing
+    try {
+        $itemsTable = $pdb->getTableName('items');
+        $pdb->query("SELECT invoice_month FROM {$itemsTable} LIMIT 1");
+    } catch (Exception $e) {
+        try {
+            $itemsTable = $pdb->getTableName('items');
+            $pdb->query("ALTER TABLE {$itemsTable} ADD COLUMN invoice_month INT DEFAULT NULL");
+        } catch (Exception $ex) {
+            // Ignore
+        }
+    }
+
     // Auto-create item_monthly_schedules table if missing
     try {
         $schedTable = $pdb->getTableName('item_monthly_schedules');
@@ -201,11 +214,8 @@ function budsheets_get_fiscal_year($dateStr = null) {
         return $year;
     }
 
-    // Check if current date is on or after fiscal year start
     $isAfterStart = ($month > $fyStartMonth) || ($month === $fyStartMonth && $day >= $fyStartDay);
 
-    // Jan 1st falls into the period that starts in previous year if fyStartMonth > 1
-    // Example: Sept 1, 2025 to Aug 31, 2026 includes Jan 1, 2026 -> Fiscal Year 2026
     if ($isAfterStart) {
         return $year + 1;
     } else {
@@ -358,7 +368,6 @@ function budsheets_calculate_item_fy_cost($item, $fiscal_year = null) {
 
     $sched = budsheets_get_item_monthly_schedule($item['id'], $fiscal_year);
 
-    // If custom schedule exists and has non-zero amounts, aggregate from schedule
     if (!empty($sched)) {
         $annualBase = array_sum($sched);
 
@@ -367,7 +376,6 @@ function budsheets_calculate_item_fy_cost($item, $fiscal_year = null) {
         return $calc;
     }
 
-    // Default: calculate from standard recurring item cost
     $calc = budsheets_calculate_item_cost_and_tax((float)$item['monthly_cost'], $item['billing_frequency'] ?? 'monthly', $item['tax_type']);
     $calc['monthly_schedule'] = [];
     return $calc;
@@ -383,12 +391,10 @@ function budsheets_get_lobs($user_id = null) {
     $table = $pdb->getTableName('lines_of_business');
     $userLobTable = $pdb->getTableName('lob_users');
 
-    // Admin users can see all LOBs
     if (has_permission('budsheets_admin')) {
         return $pdb->query("SELECT * FROM {$table} ORDER BY name ASC")->fetchAll();
     }
 
-    // Non-admin users see LOBs assigned to them OR open LOBs (no specific user restrictions)
     $currentUserId = ($user_id !== null) ? $user_id : ($_SESSION['user_id'] ?? 0);
     $sql = "SELECT l.*
             FROM {$table} l
@@ -643,13 +649,17 @@ function budsheets_save_item($data, $item_id = null) {
     $table = $pdb->getTableName('items');
     $userId = $_SESSION['user_id'] ?? null;
 
+    $billingFreq = ($data['billing_frequency'] ?? 'monthly') === 'yearly' ? 'yearly' : 'monthly';
+    $invoiceMonth = (!empty($data['invoice_month']) && $billingFreq === 'yearly') ? (int)$data['invoice_month'] : null;
+
     $fields = [
         'lob_id'                => $lobId,
         'vendor'                => trim($data['vendor']),
         'product'               => trim($data['product']),
         'currency'              => trim($data['currency'] ?? 'USD'),
         'monthly_cost'          => (float)($data['monthly_cost'] ?? 0),
-        'billing_frequency'     => ($data['billing_frequency'] ?? 'monthly') === 'yearly' ? 'yearly' : 'monthly',
+        'billing_frequency'     => $billingFreq,
+        'invoice_month'         => $invoiceMonth,
         'tax_type'              => $data['tax_type'] ?? 'no tax',
         'class'                 => trim($data['class'] ?? ''),
         'description'           => trim($data['description'] ?? ''),
@@ -669,7 +679,7 @@ function budsheets_save_item($data, $item_id = null) {
 
         $sql = "UPDATE {$table} SET
                     lob_id = ?, vendor = ?, product = ?, currency = ?, monthly_cost = ?,
-                    billing_frequency = ?, tax_type = ?, class = ?, description = ?, invoice_type = ?, invoice_date = ?,
+                    billing_frequency = ?, invoice_month = ?, tax_type = ?, class = ?, description = ?, invoice_type = ?, invoice_date = ?,
                     contract_start_date = ?, contract_end_date = ?, long_description = ?,
                     system_directory_link = ?
                 WHERE id = ?";
@@ -679,7 +689,7 @@ function budsheets_save_item($data, $item_id = null) {
         return (int)$item_id;
     } else {
         $fields['created_by'] = $userId;
-        $sql = "INSERT INTO {$table} (lob_id, vendor, product, currency, monthly_cost, billing_frequency, tax_type, class, description, invoice_type, invoice_date, contract_start_date, contract_end_date, long_description, system_directory_link, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+        $sql = "INSERT INTO {$table} (lob_id, vendor, product, currency, monthly_cost, billing_frequency, invoice_month, tax_type, class, description, invoice_type, invoice_date, contract_start_date, contract_end_date, long_description, system_directory_link, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
         $pdb->query($sql, array_values($fields));
         return budsheets_last_insert_id($pdb);
     }
@@ -958,7 +968,7 @@ function budsheets_get_dashboard_summary() {
 }
 
 // ==========================================
-// File Download & Inline View Handlers
+// File Download & Custom FY CSV Export Handlers
 // ==========================================
 
 function budsheets_handle_file_download() {
@@ -994,7 +1004,6 @@ function budsheets_handle_file_download() {
         die('File not found');
     }
 
-    // Access check: verify user has access to item's LOB
     $item = budsheets_get_item($itemId);
     if (!$item) {
         die('Access Denied: You do not have permissions to download or view files for this item.');
@@ -1029,61 +1038,83 @@ function budsheets_handle_file_download() {
 }
 
 function budsheets_export_items_csv() {
-    $lob_id = isset($_GET['lob_id']) ? (int)$_GET['lob_id'] : null;
+    $lob_id = isset($_GET['lob_id']) && $_GET['lob_id'] !== '' ? (int)$_GET['lob_id'] : null;
+    $fy = isset($_GET['fy']) ? (int)$_GET['fy'] : budsheets_get_fiscal_year();
+
     $items = budsheets_get_items($lob_id);
-    $fy = budsheets_get_fiscal_year();
+    $fyMonthsOrder = budsheets_get_fiscal_year_months();
+
+    $monthsNames = [
+        1 => 'Jan', 2 => 'Feb', 3 => 'Mar', 4 => 'Apr',
+        5 => 'May', 6 => 'Jun', 7 => 'Jul', 8 => 'Aug',
+        9 => 'Sep', 10 => 'Oct', 11 => 'Nov', 12 => 'Dec'
+    ];
 
     header('Content-Type: text/csv; charset=utf-8');
     header('Content-Disposition: attachment; filename=operational_budget_items_FY' . $fy . '_' . date('Y-m-d') . '.csv');
 
     $output = fopen('php://output', 'w');
-    fputcsv($output, [
+
+    // Build header row with dynamic FY month columns
+    $headers = [
         'ID',
         'Line of Business',
-        'Vendor',
+        'Vendor Name',
         'Product',
         'Class',
         'Billing Frequency',
-        'Currency',
-        'Entered Amount (Native)',
-        'Monthly Base (CAD)',
-        'Monthly Total w/ Tax (CAD)',
-        'Fiscal Year (' . $fy . ') Total w/ Tax (CAD)',
+        'Vendor Invoice Month',
+        'Native Currency',
+        'Native Amount',
+        'Amount in CAD',
         'Tax Type',
-        'Invoice Schedule',
-        'Contract Review Date',
-        'Contract Start',
-        'Contract End',
-        'Description',
-        'Systems Directory Link'
-    ]);
+        'Full Financial Year Amount w/ Tax (CAD)',
+        'Per Monthly Avg w/ Tax (CAD)'
+    ];
+
+    foreach ($fyMonthsOrder as $mNum) {
+        $headers[] = $monthsNames[$mNum] . ' FY' . $fy . ' (CAD)';
+    }
+
+    fputcsv($output, $headers);
 
     foreach ($items as $item) {
-        $tax = budsheets_calculate_item_fy_cost($item, $fy);
-        $monthlyBaseCad = budsheets_convert_to_cad($tax['monthly_base'], $item['currency']);
-        $monthlyTotalCad = budsheets_convert_to_cad($tax['monthly_total'], $item['currency']);
-        $annualTotalCad = budsheets_convert_to_cad($tax['annual_total'], $item['currency']);
+        $costCalc = budsheets_calculate_item_fy_cost($item, $fy);
+        $amountCad = budsheets_convert_to_cad((float)$item['monthly_cost'], $item['currency']);
+        $fullFyCad = budsheets_convert_to_cad($costCalc['annual_total'], $item['currency']);
+        $monthlyAvgCad = budsheets_convert_to_cad($costCalc['monthly_total'], $item['currency']);
 
-        fputcsv($output, [
+        $invMonthStr = 'N/A';
+        if (($item['billing_frequency'] ?? 'monthly') === 'yearly' && !empty($item['invoice_month'])) {
+            $invMonthStr = $monthsNames[(int)$item['invoice_month']] ?? 'Month #' . $item['invoice_month'];
+        }
+
+        $row = [
             $item['id'],
             $item['lob_name'],
             $item['vendor'],
             $item['product'],
             $item['class'],
             ucfirst($item['billing_frequency'] ?? 'monthly'),
+            $invMonthStr,
             $item['currency'],
-            $item['monthly_cost'],
-            number_format($monthlyBaseCad, 2, '.', ''),
-            number_format($monthlyTotalCad, 2, '.', ''),
-            number_format($annualTotalCad, 2, '.', ''),
+            number_format((float)$item['monthly_cost'], 2, '.', ''),
+            number_format($amountCad, 2, '.', ''),
             $item['tax_type'],
-            $item['invoice_type'],
-            $item['invoice_date'],
-            $item['contract_start_date'],
-            $item['contract_end_date'],
-            $item['description'],
-            $item['system_directory_link']
-        ]);
+            number_format($fullFyCad, 2, '.', ''),
+            number_format($monthlyAvgCad, 2, '.', '')
+        ];
+
+        // Append per-month values for the financial year
+        $defaultMonthlyBase = ($item['billing_frequency'] === 'yearly') ? ((float)$item['monthly_cost'] / 12.0) : (float)$item['monthly_cost'];
+        foreach ($fyMonthsOrder as $mNum) {
+            $mAmount = isset($costCalc['monthly_schedule'][$mNum]) ? $costCalc['monthly_schedule'][$mNum] : $defaultMonthlyBase;
+            $mTax = budsheets_calculate_tax($mAmount, $item['tax_type'], 'monthly');
+            $mCad = budsheets_convert_to_cad($mTax['total'], $item['currency']);
+            $row[] = number_format($mCad, 2, '.', '');
+        }
+
+        fputcsv($output, $row);
     }
 
     fclose($output);

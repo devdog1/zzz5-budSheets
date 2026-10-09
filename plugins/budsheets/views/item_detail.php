@@ -118,6 +118,12 @@ $monthsNames = [
     5 => 'May', 6 => 'Jun', 7 => 'Jul', 8 => 'Aug',
     9 => 'Sep', 10 => 'Oct', 11 => 'Nov', 12 => 'Dec'
 ];
+
+$fullMonthsNames = [
+    1 => 'January', 2 => 'February', 3 => 'March', 4 => 'April',
+    5 => 'May', 6 => 'June', 7 => 'July', 8 => 'August',
+    9 => 'September', 10 => 'October', 11 => 'November', 12 => 'December'
+];
 ?>
 
 <div class="container-fluid py-4">
@@ -174,7 +180,12 @@ $monthsNames = [
                         <div class="col-md-4">
                             <div class="small text-muted">Entered Recurring Cost</div>
                             <div class="fs-5 fw-bold text-dark">$<?= number_format((float)$item['monthly_cost'], 2) ?> <small><?= e($item['currency']) ?></small></div>
-                            <div class="small text-muted">(<?= ucfirst(e($item['billing_frequency'] ?? 'monthly')) ?>)</div>
+                            <div class="small text-muted">
+                                (<?= ucfirst(e($item['billing_frequency'] ?? 'monthly')) ?>)
+                                <?php if (($item['billing_frequency'] ?? '') === 'yearly' && !empty($item['invoice_month'])): ?>
+                                    - Invoice Month: <strong><?= $fullMonthsNames[(int)$item['invoice_month']] ?? '' ?></strong>
+                                <?php endif; ?>
+                            </div>
                         </div>
 
                         <div class="col-md-4">

@@ -123,6 +123,7 @@ $pdb->query("CREATE TABLE plug_budsheets_items (
     currency TEXT DEFAULT 'USD',
     monthly_cost REAL DEFAULT 0.00,
     billing_frequency TEXT DEFAULT 'monthly',
+    invoice_month INTEGER DEFAULT NULL,
     tax_type TEXT DEFAULT 'no tax',
     class TEXT,
     description TEXT,
@@ -273,6 +274,7 @@ $itemData = [
     'currency'              => 'USD',
     'monthly_cost'          => '12000.00',
     'billing_frequency'     => 'yearly',
+    'invoice_month'         => '5',
     'tax_type'              => 'GSTandPST',
     'class'                 => 'Cloud & SaaS Subscriptions',
     'description'           => 'Annual cloud commitment',
@@ -286,6 +288,9 @@ $itemData = [
 
 $itemId = budsheets_save_item($itemData);
 assert($itemId > 0, 'Item should be saved and return valid ID');
+
+$savedItem = budsheets_get_item($itemId);
+assert((int)$savedItem['invoice_month'] === 5, 'Vendor invoice month should be saved as 5 (May)');
 
 // Save custom monthly schedule for FY2026
 $monthlyBreakdown = [

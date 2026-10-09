@@ -34,6 +34,7 @@ CREATE TABLE IF NOT EXISTS `plug_budsheets_items` (
     `currency` VARCHAR(10) NOT NULL DEFAULT 'USD',
     `monthly_cost` DECIMAL(15,2) NOT NULL DEFAULT 0.00,
     `billing_frequency` ENUM('monthly', 'yearly') NOT NULL DEFAULT 'monthly',
+    `invoice_month` INT DEFAULT NULL,
     `tax_type` ENUM('GSTandPST', 'GST only', 'PST only', 'no tax') NOT NULL DEFAULT 'no tax',
     `class` VARCHAR(100) DEFAULT NULL,
     `description` VARCHAR(255) DEFAULT NULL,
