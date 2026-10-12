@@ -78,6 +78,36 @@ function budsheets_ensure_tables_exist($pdb) {
         }
     }
 
+    // Auto-create class_lobs table if missing
+    try {
+        $classLobsTable = $pdb->getTableName('class_lobs');
+        $pdb->query("SELECT 1 FROM {$classLobsTable} LIMIT 1");
+    } catch (Exception $e) {
+        try {
+            $classLobsTable = $pdb->getTableName('class_lobs');
+            $classesTable = $pdb->getTableName('classes');
+            $lobTable = $pdb->getTableName('lines_of_business');
+            $pdb->query("CREATE TABLE IF NOT EXISTS {$classLobsTable} (
+                class_id INT NOT NULL,
+                lob_id INT NOT NULL,
+                PRIMARY KEY (class_id, lob_id),
+                INDEX (lob_id),
+                CONSTRAINT fk_budsheets_class_lobs_class FOREIGN KEY (class_id) REFERENCES {$classesTable}(id) ON DELETE CASCADE,
+                CONSTRAINT fk_budsheets_class_lobs_lob FOREIGN KEY (lob_id) REFERENCES {$lobTable}(id) ON DELETE CASCADE
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;");
+
+            // Migrate existing single lob_id values into class_lobs table
+            $rows = $pdb->query("SELECT id, lob_id FROM {$classesTable} WHERE lob_id IS NOT NULL AND lob_id > 0")->fetchAll();
+            foreach ($rows as $r) {
+                try {
+                    $pdb->query("INSERT IGNORE INTO {$classLobsTable} (class_id, lob_id) VALUES (?, ?)", [(int)$r['id'], (int)$r['lob_id']]);
+                } catch (Exception $ex) {}
+            }
+        } catch (Exception $ex) {
+            // Ignore
+        }
+    }
+
     // Auto-create item_monthly_schedules table if missing
     try {
         $schedTable = $pdb->getTableName('item_monthly_schedules');
@@ -384,7 +414,7 @@ function budsheets_calculate_item_fy_cost($item, $fiscal_year = null) {
 }
 
 // ==========================================
-// Lines of Business (LOB) Operations
+// Budgets / Lines of Business (LOB) Operations
 // ==========================================
 
 function budsheets_get_lobs($user_id = null) {
@@ -471,7 +501,7 @@ function budsheets_delete_lob($id) {
 }
 
 // ==========================================
-// LOB User Access Assignments
+// Budget User Access Assignments
 // ==========================================
 
 function budsheets_get_lob_users($lob_id) {
@@ -528,57 +558,128 @@ function budsheets_get_all_system_users() {
 }
 
 // ==========================================
-// Classes Operations
+// Classes Operations (Supporting Multiple Budgets per Class)
 // ==========================================
 
 function budsheets_get_classes_by_lob($lob_id) {
     $pdb = budsheets_db();
     if (!$pdb || !$lob_id) return [];
-    $table = $pdb->getTableName('classes');
-    return $pdb->query("SELECT * FROM {$table} WHERE lob_id = ? ORDER BY name ASC", [(int)$lob_id])->fetchAll();
+    $classTable = $pdb->getTableName('classes');
+    $classLobsTable = $pdb->getTableName('class_lobs');
+
+    $sql = "SELECT DISTINCT c.*
+            FROM {$classTable} c
+            LEFT JOIN {$classLobsTable} cl ON c.id = cl.class_id
+            WHERE cl.lob_id = ? OR c.lob_id = ?
+            ORDER BY c.name ASC";
+    return $pdb->query($sql, [(int)$lob_id, (int)$lob_id])->fetchAll();
+}
+
+function budsheets_get_class_lobs($class_id) {
+    $pdb = budsheets_db();
+    if (!$pdb || !$class_id) return [];
+    $classLobsTable = $pdb->getTableName('class_lobs');
+    $rows = $pdb->query("SELECT lob_id FROM {$classLobsTable} WHERE class_id = ?", [(int)$class_id])->fetchAll();
+    $lobIds = array_column($rows, 'lob_id');
+
+    if (empty($lobIds)) {
+        $classTable = $pdb->getTableName('classes');
+        $c = $pdb->query("SELECT lob_id FROM {$classTable} WHERE id = ?", [(int)$class_id])->fetch();
+        if ($c && !empty($c['lob_id'])) {
+            $lobIds = [(int)$c['lob_id']];
+        }
+    }
+    return array_map('intval', $lobIds);
 }
 
 function budsheets_get_all_classes() {
     $pdb = budsheets_db();
     if (!$pdb) return [];
     $classTable = $pdb->getTableName('classes');
+    $classLobsTable = $pdb->getTableName('class_lobs');
     $lobTable = $pdb->getTableName('lines_of_business');
-    $sql = "SELECT c.*, l.name as lob_name
-            FROM {$classTable} c
-            LEFT JOIN {$lobTable} l ON c.lob_id = l.id
-            ORDER BY l.name ASC, c.name ASC";
-    return $pdb->query($sql)->fetchAll();
+
+    $classes = $pdb->query("SELECT * FROM {$classTable} ORDER BY name ASC")->fetchAll();
+
+    foreach ($classes as &$c) {
+        $c['lob_ids'] = budsheets_get_class_lobs($c['id']);
+        if (!empty($c['lob_ids'])) {
+            $placeholders = implode(',', array_fill(0, count($c['lob_ids']), '?'));
+            $lobRows = $pdb->query("SELECT name FROM {$lobTable} WHERE id IN ({$placeholders}) ORDER BY name ASC", $c['lob_ids'])->fetchAll();
+            $c['lob_names'] = implode(', ', array_column($lobRows, 'name'));
+        } else {
+            $c['lob_names'] = 'All Budgets / Unassigned';
+        }
+    }
+    unset($c);
+
+    return $classes;
 }
 
-function budsheets_add_class($lob_id, $name, $description = '') {
+function budsheets_add_class($lob_ids, $name, $description = '') {
     $pdb = budsheets_db();
     if (!$pdb) return false;
-    $table = $pdb->getTableName('classes');
-    $pdb->query("INSERT INTO {$table} (lob_id, name, description) VALUES (?, ?, ?)", [
-        (int)$lob_id,
+    $classTable = $pdb->getTableName('classes');
+    $classLobsTable = $pdb->getTableName('class_lobs');
+
+    $lobArray = is_array($lob_ids) ? array_map('intval', $lob_ids) : [(int)$lob_ids];
+    $firstLob = !empty($lobArray) ? $lobArray[0] : null;
+
+    $pdb->query("INSERT INTO {$classTable} (lob_id, name, description) VALUES (?, ?, ?)", [
+        $firstLob,
         trim($name),
         trim($description)
     ]);
-    return budsheets_last_insert_id($pdb);
+    $class_id = budsheets_last_insert_id($pdb);
+
+    if ($class_id && !empty($lobArray)) {
+        foreach ($lobArray as $lid) {
+            if ($lid > 0) {
+                try {
+                    $pdb->query("INSERT IGNORE INTO {$classLobsTable} (class_id, lob_id) VALUES (?, ?)", [(int)$class_id, (int)$lid]);
+                } catch (Exception $ex) {}
+            }
+        }
+    }
+
+    return $class_id;
 }
 
-function budsheets_update_class($id, $lob_id, $name, $description = '') {
+function budsheets_update_class($id, $lob_ids, $name, $description = '') {
     $pdb = budsheets_db();
     if (!$pdb) return false;
-    $table = $pdb->getTableName('classes');
-    return $pdb->query("UPDATE {$table} SET lob_id = ?, name = ?, description = ? WHERE id = ?", [
-        (int)$lob_id,
+    $classTable = $pdb->getTableName('classes');
+    $classLobsTable = $pdb->getTableName('class_lobs');
+
+    $lobArray = is_array($lob_ids) ? array_map('intval', $lob_ids) : [(int)$lob_ids];
+    $firstLob = !empty($lobArray) ? $lobArray[0] : null;
+
+    $pdb->query("UPDATE {$classTable} SET lob_id = ?, name = ?, description = ? WHERE id = ?", [
+        $firstLob,
         trim($name),
         trim($description),
         (int)$id
     ]);
+
+    $pdb->query("DELETE FROM {$classLobsTable} WHERE class_id = ?", [(int)$id]);
+
+    if (!empty($lobArray)) {
+        foreach ($lobArray as $lid) {
+            if ($lid > 0) {
+                try {
+                    $pdb->query("INSERT IGNORE INTO {$classLobsTable} (class_id, lob_id) VALUES (?, ?)", [(int)$id, (int)$lid]);
+                } catch (Exception $ex) {}
+            }
+        }
+    }
+    return true;
 }
 
 function budsheets_delete_class($id) {
     $pdb = budsheets_db();
     if (!$pdb) return false;
-    $table = $pdb->getTableName('classes');
-    return $pdb->query("DELETE FROM {$table} WHERE id = ?", [(int)$id]);
+    $classTable = $pdb->getTableName('classes');
+    return $pdb->query("DELETE FROM {$classTable} WHERE id = ?", [(int)$id]);
 }
 
 // ==========================================
@@ -645,7 +746,7 @@ function budsheets_save_item($data, $item_id = null) {
 
     $lobId = (int)$data['lob_id'];
     if (!budsheets_user_has_lob_access($lobId)) {
-        die('Access Denied: You do not have permissions for this Line of Business.');
+        die('Access Denied: You do not have permissions for this Budget.');
     }
 
     $table = $pdb->getTableName('items');
@@ -1060,7 +1161,7 @@ function budsheets_export_items_csv() {
     // Build header row with dynamic FY month columns
     $headers = [
         'ID',
-        'Line of Business',
+        'Budget',
         'Vendor Name',
         'Product',
         'Class',

@@ -17,13 +17,20 @@ CREATE TABLE IF NOT EXISTS `plug_budsheets_lob_users` (
 
 CREATE TABLE IF NOT EXISTS `plug_budsheets_classes` (
     `id` INT AUTO_INCREMENT PRIMARY KEY,
-    `lob_id` INT NOT NULL,
+    `lob_id` INT DEFAULT NULL,
     `name` VARCHAR(255) NOT NULL,
     `description` TEXT DEFAULT NULL,
     `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP,
-    `updated_at` DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    `updated_at` DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS `plug_budsheets_class_lobs` (
+    `class_id` INT NOT NULL,
+    `lob_id` INT NOT NULL,
+    PRIMARY KEY (`class_id`, `lob_id`),
     INDEX (`lob_id`),
-    CONSTRAINT `fk_budsheets_classes_lob` FOREIGN KEY (`lob_id`) REFERENCES `plug_budsheets_lines_of_business`(`id`) ON DELETE CASCADE
+    CONSTRAINT `fk_budsheets_class_lobs_class` FOREIGN KEY (`class_id`) REFERENCES `plug_budsheets_classes`(`id`) ON DELETE CASCADE,
+    CONSTRAINT `fk_budsheets_class_lobs_lob` FOREIGN KEY (`lob_id`) REFERENCES `plug_budsheets_lines_of_business`(`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE IF NOT EXISTS `plug_budsheets_items` (

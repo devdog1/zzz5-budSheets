@@ -34,7 +34,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $lob_id = (int)($_POST['lob_id'] ?? 0);
 
         if (!$lob_id || empty($vendor) || empty($product)) {
-            $error = 'Line of Business, Vendor, and Product are required fields.';
+            $error = 'Budget, Vendor, and Product are required fields.';
         } else {
             $savedId = budsheets_save_item($_POST, $itemId);
 
@@ -70,11 +70,19 @@ if ($action === 'edit' && !empty($_GET['id'])) {
 
 $items = budsheets_get_items($filterLob);
 
-// Build map of classes per LOB
+// Build map of classes per Budget
 $allClasses = budsheets_get_all_classes();
 $lobClassesMap = [];
 foreach ($allClasses as $c) {
-    $lobClassesMap[$c['lob_id']][] = $c['name'];
+    if (!empty($c['lob_ids'])) {
+        foreach ($c['lob_ids'] as $lid) {
+            $lobClassesMap[$lid][] = $c['name'];
+        }
+    } else {
+        foreach ($lobs as $l) {
+            $lobClassesMap[$l['id']][] = $c['name'];
+        }
+    }
 }
 
 $monthsNames = [
@@ -115,9 +123,9 @@ $monthsNames = [
 
                     <div class="row g-3">
                         <div class="col-md-6">
-                            <label class="form-label fw-semibold">Line of Business <span class="text-danger">*</span></label>
+                            <label class="form-label fw-semibold">Budget <span class="text-danger">*</span></label>
                             <select name="lob_id" id="lob_select" class="form-select" onchange="updateClassOptions()" required>
-                                <option value="">-- Select Line of Business --</option>
+                                <option value="">-- Select Budget --</option>
                                 <?php foreach ($lobs as $lob): ?>
                                     <option value="<?= (int)$lob['id'] ?>" <?= ($editItem && $editItem['lob_id'] == $lob['id']) || ($filterLob == $lob['id']) ? 'selected' : '' ?>>
                                         <?= e($lob['name']) ?> (<?= e($lob['code'] ?: 'No Code') ?>)
@@ -266,7 +274,9 @@ $monthsNames = [
                 classSelect.innerHTML = '<option value="">-- Select Class --</option>';
 
                 if (selectedLobId && lobClassesMap[selectedLobId]) {
-                    lobClassesMap[selectedLobId].forEach(function(className) {
+                    // Remove duplicate class names for selected budget
+                    const uniqueClasses = [...new Set(lobClassesMap[selectedLobId])];
+                    uniqueClasses.forEach(function(className) {
                         const opt = document.createElement('option');
                         opt.value = className;
                         opt.textContent = className;
@@ -341,7 +351,7 @@ $monthsNames = [
                     <input type="hidden" name="route" value="budsheets_items">
                     <div class="col-md-4">
                         <select name="lob_id" class="form-select" onchange="this.form.submit()">
-                            <option value="">-- All Lines of Business --</option>
+                            <option value="">-- All Budgets --</option>
                             <?php foreach ($lobs as $lob): ?>
                                 <option value="<?= (int)$lob['id'] ?>" <?= $filterLob == $lob['id'] ? 'selected' : '' ?>>
                                     <?= e($lob['name']) ?>
@@ -365,7 +375,7 @@ $monthsNames = [
                     <table class="table table-hover align-middle mb-0">
                         <thead class="table-light">
                             <tr>
-                                <th class="ps-3">Line of Business</th>
+                                <th class="ps-3">Budget</th>
                                 <th>Vendor / Product</th>
                                 <th>Class</th>
                                 <th>Entered Cost</th>
@@ -459,9 +469,9 @@ $monthsNames = [
                         </div>
                         <div class="modal-body">
                             <div class="mb-3">
-                                <label class="form-label fw-semibold">Line of Business</label>
+                                <label class="form-label fw-semibold">Budget</label>
                                 <select name="lob_id" class="form-select">
-                                    <option value="">-- All Lines of Business --</option>
+                                    <option value="">-- All Budgets --</option>
                                     <?php foreach ($lobs as $lob): ?>
                                         <option value="<?= (int)$lob['id'] ?>" <?= $filterLob == $lob['id'] ? 'selected' : '' ?>><?= e($lob['name']) ?></option>
                                     <?php endforeach; ?>

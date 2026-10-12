@@ -108,11 +108,17 @@ $pdb->query("CREATE TABLE plug_budsheets_lob_users (
 
 $pdb->query("CREATE TABLE plug_budsheets_classes (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    lob_id INTEGER NOT NULL,
+    lob_id INTEGER DEFAULT NULL,
     name TEXT NOT NULL,
     description TEXT,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);");
+
+$pdb->query("CREATE TABLE plug_budsheets_class_lobs (
+    class_id INTEGER NOT NULL,
+    lob_id INTEGER NOT NULL,
+    PRIMARY KEY (class_id, lob_id)
 );");
 
 $pdb->query("CREATE TABLE plug_budsheets_items (
@@ -183,23 +189,23 @@ echo "[TEST] Database tables initialized successfully.\n";
 // Load Plugin Entry File and Models
 require_once __DIR__ . '/../plugins/budsheets/plugin.php';
 
-// Test 1: Lines of Business CRUD & User Assignments
-echo "[TEST] Testing Lines of Business operations & user assignments...\n";
+// Test 1: Lines of Business / Budgets CRUD & User Assignments
+echo "[TEST] Testing Budgets operations & user assignments...\n";
 budsheets_add_lob('Information Technology', 'IT', 'IT Infrastructure and Software', [10, 11]);
 budsheets_add_lob('Human Resources', 'HR', 'HR Services', [12]);
 
 $lobs = budsheets_get_lobs();
-assert(count($lobs) === 2, 'Should return 2 LOBs for admin');
+assert(count($lobs) === 2, 'Should return 2 Budgets for admin');
 
 $itUsers = budsheets_get_lob_users(1);
-assert(count($itUsers) === 2, 'IT LOB should have 2 assigned users');
+assert(count($itUsers) === 2, 'IT Budget should have 2 assigned users');
 assert(in_array(10, $itUsers) && in_array(11, $itUsers), 'User 10 and 11 assigned to IT');
 
 // Test access filtering for non-admin user
 $user_permissions = ['budsheets_view', 'budsheets_edit']; // strip budsheets_admin
 $_SESSION['user_id'] = 12;
 $hrUserLobs = budsheets_get_lobs();
-assert(count($hrUserLobs) === 2, 'Non-admin user 12 sees assigned HR LOB and unassigned open LOBs');
+assert(count($hrUserLobs) === 2, 'Non-admin user 12 sees assigned HR Budget and unassigned open Budgets');
 
 // Restore admin permissions
 $user_permissions = ['budsheets_view', 'budsheets_edit', 'budsheets_admin'];
@@ -207,8 +213,8 @@ $_SESSION['user_id'] = 1;
 
 budsheets_update_lob(1, 'InfoTech', 'IT-UPDATED', 'Updated description', [10]);
 $updatedUsers = budsheets_get_lob_users(1);
-assert(count($updatedUsers) === 1 && $updatedUsers[0] == 10, 'IT LOB updated user assignment');
-echo "  ✓ LOB CRUD & User assignment tests passed.\n";
+assert(count($updatedUsers) === 1 && $updatedUsers[0] == 10, 'IT Budget updated user assignment');
+echo "  ✓ Budgets CRUD & User assignment tests passed.\n";
 
 // Test 2: Tax, Currency Conversion & Fiscal Year Settings
 echo "[TEST] Testing tax, currency conversion & fiscal year determination logic...\n";
@@ -241,20 +247,23 @@ $convertedCad = budsheets_convert_to_cad(100.00, 'USD');
 assert($convertedCad == 135.00, '$100 USD converts to $135.00 CAD at 1.35 rate');
 echo "  ✓ Tax, Currency conversion & Fiscal Year tests passed.\n";
 
-// Test 3: Expense Classes CRUD & LOB Assignment
-echo "[TEST] Testing Expense Classes operations & LOB associations...\n";
-$classId1 = budsheets_add_class(1, 'Software Subscriptions', 'SaaS and cloud software licenses');
+// Test 3: Expense Classes CRUD & Multi-Budget Assignment
+echo "[TEST] Testing Expense Classes operations & Multi-Budget associations...\n";
+$classId1 = budsheets_add_class([1, 2], 'Shared Software Subscriptions', 'SaaS and cloud software licenses used across IT and HR');
 $classId2 = budsheets_add_class(1, 'Hardware Purchase', 'Servers and laptops');
 $classId3 = budsheets_add_class(2, 'Recruitment Services', 'Headhunting and agency fees');
 
 $itClasses = budsheets_get_classes_by_lob(1);
-assert(count($itClasses) === 2, 'IT LOB should have 2 classes');
-assert($itClasses[0]['name'] === 'Hardware Purchase' || $itClasses[1]['name'] === 'Hardware Purchase', 'Hardware class exists');
+assert(count($itClasses) === 2, 'IT Budget should have 2 classes (Shared Subscriptions & Hardware)');
 
-budsheets_update_class($classId1, 1, 'Cloud & SaaS Subscriptions', 'Updated SaaS description');
+$hrClasses = budsheets_get_classes_by_lob(2);
+assert(count($hrClasses) === 2, 'HR Budget should have 2 classes (Shared Subscriptions & Recruitment)');
+
+budsheets_update_class($classId1, [1, 2], 'Cloud & SaaS Subscriptions', 'Updated SaaS description');
 $allClasses = budsheets_get_all_classes();
 assert(count($allClasses) === 3, 'All classes count is 3');
-echo "  ✓ Expense Classes tests passed.\n";
+assert(count($allClasses[0]['lob_ids']) === 2, 'Shared class is assigned to 2 budgets');
+echo "  ✓ Multi-Budget Expense Classes tests passed.\n";
 
 // Test 4: File Extension Whitelisting
 echo "[TEST] Testing file extension whitelisting...\n";

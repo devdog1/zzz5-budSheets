@@ -30,14 +30,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $error = 'Failed to update settings.';
         }
     } elseif ($action === 'create_class') {
-        $lob_id = (int)($_POST['lob_id'] ?? 0);
+        $lob_ids = $_POST['lob_ids'] ?? [];
         $name = trim($_POST['name'] ?? '');
         $description = trim($_POST['description'] ?? '');
 
-        if (!$lob_id || empty($name)) {
-            $error = 'Line of Business and Class Name are required fields.';
+        if (empty($lob_ids) || empty($name)) {
+            $error = 'At least one Budget and Class Name are required fields.';
         } else {
-            if (budsheets_add_class($lob_id, $name, $description)) {
+            if (budsheets_add_class($lob_ids, $name, $description)) {
                 $message = 'Expense Class created successfully.';
             } else {
                 $error = 'Failed to create Expense Class.';
@@ -45,14 +45,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
     } elseif ($action === 'update_class') {
         $class_id = (int)($_POST['class_id'] ?? 0);
-        $lob_id = (int)($_POST['lob_id'] ?? 0);
+        $lob_ids = $_POST['lob_ids'] ?? [];
         $name = trim($_POST['name'] ?? '');
         $description = trim($_POST['description'] ?? '');
 
-        if (!$class_id || !$lob_id || empty($name)) {
-            $error = 'Invalid input for updating Expense Class.';
+        if (!$class_id || empty($lob_ids) || empty($name)) {
+            $error = 'At least one Budget and Class Name are required.';
         } else {
-            if (budsheets_update_class($class_id, $lob_id, $name, $description)) {
+            if (budsheets_update_class($class_id, $lob_ids, $name, $description)) {
                 $message = 'Expense Class updated successfully.';
             } else {
                 $error = 'Failed to update Expense Class.';
@@ -86,7 +86,7 @@ $currentFy = budsheets_get_fiscal_year();
     <div class="d-flex justify-content-between align-items-center mb-4">
         <div>
             <h2 class="fw-bold text-dark mb-1"><i class="fa-solid fa-gear me-2 text-primary"></i>Plugin Settings & Configurations</h2>
-            <p class="text-muted small mb-0">Manage Fiscal Year boundaries, PST/GST tax rates, currency exchange rates to CAD, and LOB expense classes.</p>
+            <p class="text-muted small mb-0">Manage Fiscal Year boundaries, PST/GST tax rates, currency exchange rates to CAD, and Budget expense classes.</p>
         </div>
     </div>
 
@@ -202,7 +202,7 @@ $currentFy = budsheets_get_fiscal_year();
                             <thead class="table-light">
                                 <tr>
                                     <th class="ps-3">Class Name</th>
-                                    <th>Line of Business</th>
+                                    <th>Assigned Budgets</th>
                                     <th class="text-end pe-3">Actions</th>
                                 </tr>
                             </thead>
@@ -215,7 +215,7 @@ $currentFy = budsheets_get_fiscal_year();
                                     <?php foreach ($classes as $cls): ?>
                                         <tr>
                                             <td class="ps-3 fw-bold text-dark"><?= e($cls['name']) ?></td>
-                                            <td><span class="badge bg-primary-subtle text-primary border border-primary-subtle"><?= e($cls['lob_name']) ?></span></td>
+                                            <td><span class="badge bg-primary-subtle text-primary border border-primary-subtle"><?= e($cls['lob_names']) ?></span></td>
                                             <td class="text-end pe-3">
                                                 <button type="button" class="btn btn-sm btn-outline-secondary me-1" data-bs-toggle="modal" data-bs-target="#editClassModal<?= (int)$cls['id'] ?>">
                                                     <i class="fa-solid fa-pen-to-square"></i>
@@ -245,17 +245,22 @@ $currentFy = budsheets_get_fiscal_year();
                                                         </div>
                                                         <div class="modal-body">
                                                             <div class="mb-3">
-                                                                <label class="form-label fw-semibold">Assigned Line of Business <span class="text-danger">*</span></label>
-                                                                <select name="lob_id" class="form-select" required>
-                                                                    <option value="">-- Select Line of Business --</option>
-                                                                    <?php foreach ($lobs as $lob): ?>
-                                                                        <option value="<?= (int)$lob['id'] ?>" <?= $cls['lob_id'] == $lob['id'] ? 'selected' : '' ?>><?= e($lob['name']) ?></option>
-                                                                    <?php endforeach; ?>
-                                                                </select>
-                                                            </div>
-                                                            <div class="mb-3">
                                                                 <label class="form-label fw-semibold">Class Name <span class="text-danger">*</span></label>
                                                                 <input type="text" name="name" class="form-control" value="<?= e($cls['name']) ?>" required>
+                                                            </div>
+                                                            <div class="mb-3">
+                                                                <label class="form-label fw-semibold">Assigned Budgets <span class="text-danger">*</span></label>
+                                                                <div class="border rounded p-3 bg-light" style="max-height: 180px; overflow-y: auto;">
+                                                                    <?php foreach ($lobs as $lob): ?>
+                                                                        <div class="form-check">
+                                                                            <input class="form-check-input" type="checkbox" name="lob_ids[]" value="<?= (int)$lob['id'] ?>" id="edit_class_<?= (int)$cls['id'] ?>_lob_<?= (int)$lob['id'] ?>" <?= in_array($lob['id'], $cls['lob_ids']) ? 'checked' : '' ?>>
+                                                                            <label class="form-check-label" for="edit_class_<?= (int)$cls['id'] ?>_lob_<?= (int)$lob['id'] ?>">
+                                                                                <?= e($lob['name']) ?> (<?= e($lob['code'] ?: 'No Code') ?>)
+                                                                            </label>
+                                                                        </div>
+                                                                    <?php endforeach; ?>
+                                                                </div>
+                                                                <div class="form-text">Select one or multiple budgets where this class applies.</div>
                                                             </div>
                                                             <div class="mb-3">
                                                                 <label class="form-label fw-semibold">Description</label>
@@ -294,17 +299,22 @@ $currentFy = budsheets_get_fiscal_year();
                 </div>
                 <div class="modal-body">
                     <div class="mb-3">
-                        <label class="form-label fw-semibold">Assigned Line of Business <span class="text-danger">*</span></label>
-                        <select name="lob_id" class="form-select" required>
-                            <option value="">-- Select Line of Business --</option>
-                            <?php foreach ($lobs as $lob): ?>
-                                <option value="<?= (int)$lob['id'] ?>"><?= e($lob['name']) ?></option>
-                            <?php endforeach; ?>
-                        </select>
-                    </div>
-                    <div class="mb-3">
                         <label class="form-label fw-semibold">Class Name <span class="text-danger">*</span></label>
                         <input type="text" name="name" class="form-control" placeholder="e.g. Software Licenses, Hardware, Professional Services" required>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label fw-semibold">Assigned Budgets <span class="text-danger">*</span></label>
+                        <div class="border rounded p-3 bg-light" style="max-height: 180px; overflow-y: auto;">
+                            <?php foreach ($lobs as $lob): ?>
+                                <div class="form-check">
+                                    <input class="form-check-input" type="checkbox" name="lob_ids[]" value="<?= (int)$lob['id'] ?>" id="add_class_lob_<?= (int)$lob['id'] ?>" checked>
+                                    <label class="form-check-label" for="add_class_lob_<?= (int)$lob['id'] ?>">
+                                        <?= e($lob['name']) ?> (<?= e($lob['code'] ?: 'No Code') ?>)
+                                    </label>
+                                </div>
+                            <?php endforeach; ?>
+                        </div>
+                        <div class="form-text">Select one or multiple budgets where this class applies.</div>
                     </div>
                     <div class="mb-3">
                         <label class="form-label fw-semibold">Description</label>

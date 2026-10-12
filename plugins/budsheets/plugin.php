@@ -1,7 +1,7 @@
 <?php
 /**
  * Plugin Name: Operational Budget Sheets (BudSheets)
- * Description: Operational budget tracking plugin. Manage Lines of Business, expense classes, budget items, contract documents, and invoices.
+ * Description: Operational budget tracking plugin. Manage Budgets, expense classes, budget items, contract documents, and invoices.
  * Version: 1.1.0
  * Author: DevDog
  * Permissions: budsheets_view, budsheets_edit, budsheets_admin
@@ -71,7 +71,7 @@ add_filter('theme_nav_links', function ($links) {
     ];
 
     if (has_permission('budsheets_admin')) {
-        $children[] = ['label' => 'Lines of Business', 'icon' => 'fa-solid fa-sitemap', 'route' => 'budsheets_lobs'];
+        $children[] = ['label' => 'Budgets', 'icon' => 'fa-solid fa-sitemap', 'route' => 'budsheets_lobs'];
         $children[] = ['label' => 'Settings & Classes', 'icon' => 'fa-solid fa-gear', 'route' => 'budsheets_settings'];
     }
 
@@ -103,7 +103,7 @@ add_action('index_dashboard_widgets', function ($userContext) {
             </div>
             <div class="row text-center mt-3">
                 <div class="col-4">
-                    <div class="small text-muted">Lines of Business</div>
+                    <div class="small text-muted">Budgets</div>
                     <div class="fs-4 fw-bold"><?= (int)$summary['lob_count'] ?></div>
                 </div>
                 <div class="col-4">

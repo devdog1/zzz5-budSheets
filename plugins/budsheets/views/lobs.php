@@ -1,6 +1,6 @@
 <?php
 /**
- * LOB Management View
+ * Budgets Management View
  */
 
 if (!defined('APP_ROOT')) {
@@ -30,12 +30,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $assigned_users = $_POST['assigned_users'] ?? [];
 
         if (empty($name)) {
-            $error = 'Line of Business name is required.';
+            $error = 'Budget name is required.';
         } else {
             if (budsheets_add_lob($name, $code, $description, $assigned_users)) {
-                $message = 'Line of Business created successfully.';
+                $message = 'Budget created successfully.';
             } else {
-                $error = 'Failed to create Line of Business.';
+                $error = 'Failed to create Budget.';
             }
         }
     } elseif ($action === 'update_lob') {
@@ -46,21 +46,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $assigned_users = $_POST['assigned_users'] ?? [];
 
         if (!$lob_id || empty($name)) {
-            $error = 'Invalid input for updating Line of Business.';
+            $error = 'Invalid input for updating Budget.';
         } else {
             if (budsheets_update_lob($lob_id, $name, $code, $description, $assigned_users)) {
-                $message = 'Line of Business updated successfully.';
+                $message = 'Budget updated successfully.';
             } else {
-                $error = 'Failed to update Line of Business.';
+                $error = 'Failed to update Budget.';
             }
         }
     } elseif ($action === 'delete_lob') {
         $lob_id = (int)($_POST['lob_id'] ?? 0);
         if ($lob_id) {
             if (budsheets_delete_lob($lob_id)) {
-                $message = 'Line of Business deleted successfully.';
+                $message = 'Budget deleted successfully.';
             } else {
-                $error = 'Failed to delete Line of Business.';
+                $error = 'Failed to delete Budget.';
             }
         }
     }
@@ -72,11 +72,11 @@ $lobs = budsheets_get_lobs();
 <div class="container-fluid py-4">
     <div class="d-flex justify-content-between align-items-center mb-4">
         <div>
-            <h2 class="fw-bold text-dark mb-1"><i class="fa-solid fa-sitemap me-2 text-primary"></i>Lines of Business</h2>
-            <p class="text-muted small mb-0">Manage organizational departments and configure specific user access permissions per Line of Business.</p>
+            <h2 class="fw-bold text-dark mb-1"><i class="fa-solid fa-sitemap me-2 text-primary"></i>Budgets</h2>
+            <p class="text-muted small mb-0">Manage organizational budgets and configure specific user access permissions per Budget.</p>
         </div>
         <button type="button" class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#addLobModal">
-            <i class="fa-solid fa-plus me-1"></i> Add Line of Business
+            <i class="fa-solid fa-plus me-1"></i> Add Budget
         </button>
     </div>
 
@@ -102,7 +102,7 @@ $lobs = budsheets_get_lobs();
                         <tr>
                             <th class="ps-3">ID</th>
                             <th>Code</th>
-                            <th>Name</th>
+                            <th>Budget Name</th>
                             <th>Description</th>
                             <th>Assigned Users</th>
                             <th>Created At</th>
@@ -112,7 +112,7 @@ $lobs = budsheets_get_lobs();
                     <tbody>
                         <?php if (empty($lobs)): ?>
                             <tr>
-                                <td colspan="7" class="text-center py-4 text-muted">No Lines of Business found. Click "Add Line of Business" to create one.</td>
+                                <td colspan="7" class="text-center py-4 text-muted">No Budgets found. Click "Add Budget" to create one.</td>
                             </tr>
                         <?php else: ?>
                             <?php foreach ($lobs as $lob):
@@ -139,7 +139,7 @@ $lobs = budsheets_get_lobs();
                                                 data-bs-target="#editLobModal<?= (int)$lob['id'] ?>">
                                             <i class="fa-solid fa-pen-to-square"></i>
                                         </button>
-                                        <form method="POST" class="d-inline" onsubmit="return confirm('Are you sure you want to delete this Line of Business? Associated items will be deleted.');">
+                                        <form method="POST" class="d-inline" onsubmit="return confirm('Are you sure you want to delete this Budget? Associated items will be deleted.');">
                                             <?php if (function_exists('csrf_field')) echo csrf_field(); ?>
                                             <input type="hidden" name="action" value="delete_lob">
                                             <input type="hidden" name="lob_id" value="<?= (int)$lob['id'] ?>">
@@ -159,12 +159,12 @@ $lobs = budsheets_get_lobs();
                                                 <input type="hidden" name="action" value="update_lob">
                                                 <input type="hidden" name="lob_id" value="<?= (int)$lob['id'] ?>">
                                                 <div class="modal-header">
-                                                    <h5 class="modal-title fw-bold"><i class="fa-solid fa-pen-to-square me-2"></i>Edit Line of Business</h5>
+                                                    <h5 class="modal-title fw-bold"><i class="fa-solid fa-pen-to-square me-2"></i>Edit Budget</h5>
                                                     <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
                                                 </div>
                                                 <div class="modal-body">
                                                     <div class="mb-3">
-                                                        <label class="form-label fw-semibold">Line of Business Name <span class="text-danger">*</span></label>
+                                                        <label class="form-label fw-semibold">Budget Name <span class="text-danger">*</span></label>
                                                         <input type="text" name="name" class="form-control" value="<?= e($lob['name']) ?>" required>
                                                     </div>
                                                     <div class="mb-3">
@@ -188,7 +188,7 @@ $lobs = budsheets_get_lobs();
                                                                     </div>
                                                                 <?php endforeach; ?>
                                                             </div>
-                                                            <div class="form-text">Select users who are authorized to view and access this Line of Business.</div>
+                                                            <div class="form-text">Select users who are authorized to view and access this Budget.</div>
                                                         </div>
                                                     <?php endif; ?>
                                                 </div>
@@ -217,12 +217,12 @@ $lobs = budsheets_get_lobs();
                 <?php if (function_exists('csrf_field')) echo csrf_field(); ?>
                 <input type="hidden" name="action" value="create_lob">
                 <div class="modal-header">
-                    <h5 class="modal-title fw-bold"><i class="fa-solid fa-sitemap me-2"></i>Add Line of Business</h5>
+                    <h5 class="modal-title fw-bold"><i class="fa-solid fa-sitemap me-2"></i>Add Budget</h5>
                     <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
                 </div>
                 <div class="modal-body">
                     <div class="mb-3">
-                        <label class="form-label fw-semibold">Line of Business Name <span class="text-danger">*</span></label>
+                        <label class="form-label fw-semibold">Budget Name <span class="text-danger">*</span></label>
                         <input type="text" name="name" class="form-control" placeholder="e.g. Information Technology" required>
                     </div>
                     <div class="mb-3">
@@ -231,7 +231,7 @@ $lobs = budsheets_get_lobs();
                     </div>
                     <div class="mb-3">
                         <label class="form-label fw-semibold">Description</label>
-                        <textarea name="description" class="form-control" rows="2" placeholder="Brief description of this business unit..."></textarea>
+                        <textarea name="description" class="form-control" rows="2" placeholder="Brief description of this budget..."></textarea>
                     </div>
                     <?php if (!empty($systemUsers)): ?>
                         <div class="mb-3">
@@ -246,13 +246,13 @@ $lobs = budsheets_get_lobs();
                                     </div>
                                 <?php endforeach; ?>
                             </div>
-                            <div class="form-text">Select users who are authorized to view and access this Line of Business.</div>
+                            <div class="form-text">Select users who are authorized to view and access this Budget.</div>
                         </div>
                     <?php endif; ?>
                 </div>
                 <div class="modal-footer">
                     <button type="button" class="btn btn-light" data-bs-dismiss="modal">Cancel</button>
-                    <button type="submit" class="btn btn-primary">Create Line of Business</button>
+                    <button type="submit" class="btn btn-primary">Create Budget</button>
                 </div>
             </form>
         </div>

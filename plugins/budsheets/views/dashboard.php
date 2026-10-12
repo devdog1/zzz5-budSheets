@@ -21,7 +21,7 @@ $currFy = budsheets_get_fiscal_year();
     <div class="d-flex justify-content-between align-items-center mb-4">
         <div>
             <h2 class="fw-bold text-dark mb-1"><i class="fa-solid fa-calculator me-2 text-primary"></i>Operational Budgets Dashboard</h2>
-            <p class="text-muted small mb-0">Overview of organizational lines of business, recurring operational expenses, and invoices in <strong>CAD</strong> (FY<?= $currFy ?>).</p>
+            <p class="text-muted small mb-0">Overview of organizational budgets, recurring operational expenses, and invoices in <strong>CAD</strong> (FY<?= $currFy ?>).</p>
         </div>
         <div>
             <?php if (has_permission('budsheets_edit')): ?>
@@ -34,7 +34,7 @@ $currFy = budsheets_get_fiscal_year();
                     <i class="fa-solid fa-gear me-1"></i> Settings
                 </a>
                 <a href="<?= url_for('budsheets_lobs') ?>" class="btn btn-outline-secondary">
-                    <i class="fa-solid fa-sitemap me-1"></i> Lines of Business
+                    <i class="fa-solid fa-sitemap me-1"></i> Budgets
                 </a>
             <?php endif; ?>
         </div>
@@ -50,7 +50,7 @@ $currFy = budsheets_get_fiscal_year();
                             <i class="fa-solid fa-sitemap fa-xl"></i>
                         </div>
                         <div>
-                            <div class="text-muted small fw-semibold text-uppercase">Lines of Business</div>
+                            <div class="text-muted small fw-semibold text-uppercase">Budgets</div>
                             <div class="fs-3 fw-bold text-dark"><?= (int)$summary['lob_count'] ?></div>
                         </div>
                     </div>
@@ -110,7 +110,7 @@ $currFy = budsheets_get_fiscal_year();
     <!-- Line of Business Breakdown Table -->
     <div class="card border-0 shadow-sm mb-4">
         <div class="card-header bg-white py-3 d-flex justify-content-between align-items-center">
-            <h5 class="fw-bold mb-0 text-dark"><i class="fa-solid fa-layer-group me-2 text-secondary"></i>Line of Business Budget Allocation (All converted to CAD - FY<?= $currFy ?>)</h5>
+            <h5 class="fw-bold mb-0 text-dark"><i class="fa-solid fa-layer-group me-2 text-secondary"></i>Budget Allocations (All converted to CAD - FY<?= $currFy ?>)</h5>
             <span class="badge bg-light text-secondary border">FY<?= $currFy ?> Active Budget Year</span>
         </div>
         <div class="card-body p-0">
@@ -118,7 +118,7 @@ $currFy = budsheets_get_fiscal_year();
                 <table class="table table-hover align-middle mb-0">
                     <thead class="table-light">
                         <tr>
-                            <th class="ps-3">Line of Business</th>
+                            <th class="ps-3">Budget</th>
                             <th>Code</th>
                             <th class="text-center">Assigned Items</th>
                             <th>Monthly Avg Pre-Tax (CAD)</th>
@@ -130,7 +130,7 @@ $currFy = budsheets_get_fiscal_year();
                     <tbody>
                         <?php if (empty($lobs)): ?>
                             <tr>
-                                <td colspan="7" class="text-center py-4 text-muted">No Lines of Business defined yet.</td>
+                                <td colspan="7" class="text-center py-4 text-muted">No Budgets defined yet.</td>
                             </tr>
                         <?php else: ?>
                             <?php foreach ($lobs as $lob):
