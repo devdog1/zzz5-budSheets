@@ -23,6 +23,10 @@ $error = '';
 
 $currentFy = budsheets_get_fiscal_year();
 $selectedFy = isset($_GET['fy']) ? (int)$_GET['fy'] : $currentFy;
+$isFyLocked = budsheets_is_fiscal_year_locked($selectedFy);
+
+$itemStartFy = budsheets_get_fiscal_year($item['contract_start_date'] ?: ($item['created_at'] ?? null));
+$isItemFyLocked = budsheets_is_fiscal_year_locked($itemStartFy);
 
 // Handle Actions (Invoices, Contract Deletion, Monthly Budget Schedule)
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
@@ -138,13 +142,22 @@ $fullMonthsNames = [
             <a href="<?= url_for('budsheets_items') ?>" class="btn btn-outline-secondary me-2">
                 <i class="fa-solid fa-arrow-left me-1"></i> Back to Items
             </a>
-            <?php if (has_permission('budsheets_edit')): ?>
+            <?php if (has_permission('budsheets_edit') && !$isItemFyLocked): ?>
                 <a href="<?= url_for('budsheets_items') ?>&action=edit&id=<?= (int)$item['id'] ?>" class="btn btn-primary">
                     <i class="fa-solid fa-pen-to-square me-1"></i> Edit Item
                 </a>
             <?php endif; ?>
         </div>
     </div>
+
+    <?php if ($isFyLocked): ?>
+        <div class="alert alert-warning border-warning d-flex align-items-center mb-4" role="alert">
+            <i class="fa-solid fa-lock fa-xl text-warning me-3"></i>
+            <div>
+                <strong>Fiscal Year FY<?= $selectedFy ?> Budget is Locked.</strong> Basic item details and monthly budget breakdowns for FY<?= $selectedFy ?> are read-only. Invoices can still be recorded and uploaded below.
+            </div>
+        </div>
+    <?php endif; ?>
 
     <?php if ($message): ?>
         <div class="alert alert-success alert-dismissible fade show" role="alert">
@@ -170,7 +183,9 @@ $fullMonthsNames = [
                         <label class="me-2 small fw-semibold mb-0">Fiscal Year:</label>
                         <select class="form-select form-select-sm" onchange="location.href='<?= url_for('budsheets_item_detail') ?>&id=<?= $itemId ?>&fy=' + this.value;">
                             <?php for ($y = $currentFy - 3; $y <= $currentFy + 3; $y++): ?>
-                                <option value="<?= $y ?>" <?= $y === $selectedFy ? 'selected' : '' ?>>FY<?= $y ?></option>
+                                <option value="<?= $y ?>" <?= $y === $selectedFy ? 'selected' : '' ?>>
+                                    FY<?= $y ?><?= budsheets_is_fiscal_year_locked($y) ? ' (Locked)' : '' ?>
+                                </option>
                             <?php endfor; ?>
                         </select>
                     </div>
@@ -186,7 +201,7 @@ $fullMonthsNames = [
                                     <br>(Monthly Avg Base: $<?= number_format($fyCalc['monthly_base'], 2) ?>)
                                 </div>
                             <?php else: ?>
-                                <div class="fs-5 fw-bold text-dark">$<?= number_format((float)$item['monthly_cost'], 2) ?> <small><?= e($item['currency']) ?></small></div>
+                                <div class="fs-5 fw-bold text-dark">$<?= number_format((float)$fyCalc['monthly_base'], 2) ?> <small><?= e($item['currency']) ?></small></div>
                                 <div class="small text-muted">
                                     (<?= ucfirst(e($item['billing_frequency'] ?? 'monthly')) ?>)
                                     <?php if (($item['billing_frequency'] ?? '') === 'yearly' && !empty($item['invoice_month'])): ?>
@@ -277,7 +292,7 @@ $fullMonthsNames = [
             <div class="card border-0 shadow-sm h-100">
                 <div class="card-header bg-white py-3 d-flex justify-content-between align-items-center">
                     <h5 class="fw-bold mb-0 text-dark"><i class="fa-solid fa-file-contract me-2 text-primary"></i>Contract Copies</h5>
-                    <?php if (has_permission('budsheets_edit')): ?>
+                    <?php if (has_permission('budsheets_edit') && !$isFyLocked): ?>
                         <button type="button" class="btn btn-sm btn-outline-primary" data-bs-toggle="modal" data-bs-target="#uploadContractModal">
                             <i class="fa-solid fa-upload"></i>
                         </button>
@@ -302,7 +317,7 @@ $fullMonthsNames = [
                                             <a href="<?= url_for('budsheets_download_file') ?>&file_type=contract&file_id=<?= (int)$c['id'] ?>&disposition=attachment" class="btn btn-sm btn-outline-secondary me-1" title="Download File">
                                                 <i class="fa-solid fa-download"></i>
                                             </a>
-                                            <?php if (has_permission('budsheets_edit')): ?>
+                                            <?php if (has_permission('budsheets_edit') && !$isFyLocked): ?>
                                                 <form method="POST" class="d-inline" onsubmit="return confirm('Remove this contract document?');">
                                                     <?php if (function_exists('csrf_field')) echo csrf_field(); ?>
                                                     <input type="hidden" name="action" value="delete_contract_file">
@@ -326,10 +341,15 @@ $fullMonthsNames = [
     <div class="card border-0 shadow-sm mb-4">
         <div class="card-header bg-white py-3 d-flex justify-content-between align-items-center">
             <div>
-                <h5 class="fw-bold mb-0 text-dark"><i class="fa-solid fa-calendar-week me-2 text-primary"></i>Monthly Budget Breakdown for Fiscal Year FY<?= $selectedFy ?></h5>
+                <h5 class="fw-bold mb-0 text-dark">
+                    <i class="fa-solid fa-calendar-week me-2 text-primary"></i>Monthly Budget Breakdown for Fiscal Year FY<?= $selectedFy ?>
+                    <?php if ($isFyLocked): ?>
+                        <span class="badge bg-danger ms-2"><i class="fa-solid fa-lock me-1"></i>Locked</span>
+                    <?php endif; ?>
+                </h5>
                 <span class="small text-muted">Customize variable pre-tax monthly dollar amounts for this specific fiscal year</span>
             </div>
-            <?php if (has_permission('budsheets_edit')): ?>
+            <?php if (has_permission('budsheets_edit') && !$isFyLocked): ?>
                 <button type="button" class="btn btn-sm btn-outline-primary" data-bs-toggle="modal" data-bs-target="#monthlyScheduleModal">
                     <i class="fa-solid fa-pen-to-square me-1"></i> Edit FY<?= $selectedFy ?> Schedule
                 </button>
@@ -340,7 +360,7 @@ $fullMonthsNames = [
                 <?php
                 $defaultMonthlyBase = ($item['billing_frequency'] === 'yearly') ? ((float)$item['monthly_cost'] / 12.0) : (float)$item['monthly_cost'];
                 foreach ($fyMonthsOrder as $mNum):
-                    $mAmount = isset($existingSchedule[$mNum]) ? $existingSchedule[$mNum] : $defaultMonthlyBase;
+                    $mAmount = isset($existingSchedule[$mNum]) ? $existingSchedule[$mNum] : ($fyCalc['has_custom_schedule'] ? 0.0 : $fyCalc['monthly_base']);
                     $mTax = budsheets_calculate_tax($mAmount, $item['tax_type'], 'monthly');
                     $mCadTotal = budsheets_convert_to_cad($mTax['total'], $item['currency']);
                 ?>
@@ -357,7 +377,7 @@ $fullMonthsNames = [
         </div>
     </div>
 
-    <!-- Invoices Section -->
+    <!-- Invoices Section (Allowed on Locked Fiscal Years) -->
     <div class="card border-0 shadow-sm">
         <div class="card-header bg-white py-3 d-flex justify-content-between align-items-center">
             <div>
@@ -605,64 +625,68 @@ $fullMonthsNames = [
 </div>
 
 <!-- Edit FY Monthly Schedule Modal -->
-<div class="modal fade" id="monthlyScheduleModal" tabindex="-1">
-    <div class="modal-dialog modal-lg">
-        <div class="modal-content">
-            <form method="POST">
-                <?php if (function_exists('csrf_field')) echo csrf_field(); ?>
-                <input type="hidden" name="action" value="save_monthly_schedule">
-                <input type="hidden" name="fiscal_year" value="<?= $selectedFy ?>">
-                <div class="modal-header">
-                    <h5 class="modal-title fw-bold"><i class="fa-solid fa-calendar-week me-2"></i>Edit FY<?= $selectedFy ?> Monthly Budget Breakdown</h5>
-                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-                </div>
-                <div class="modal-body">
-                    <p class="small text-muted mb-3">Specify exact <strong>pre-tax</strong> dollar amounts (in <strong><?= e($item['currency']) ?></strong>) for each month of Fiscal Year FY<?= $selectedFy ?>.</p>
-                    <div class="row g-3">
-                        <?php foreach ($fyMonthsOrder as $mNum):
-                            $val = isset($existingSchedule[$mNum]) ? $existingSchedule[$mNum] : $defaultMonthlyBase;
-                        ?>
-                            <div class="col-md-3">
-                                <label class="form-label small fw-semibold mb-1"><?= $monthsNames[$mNum] ?> (Pre-Tax)</label>
-                                <div class="input-group input-group-sm">
-                                    <span class="input-group-text">$</span>
-                                    <input type="number" step="0.01" name="monthly_amounts[<?= $mNum ?>]" class="form-control" value="<?= number_format($val, 2, '.', '') ?>" required>
-                                </div>
-                            </div>
-                        <?php endforeach; ?>
+<?php if (!$isFyLocked): ?>
+    <div class="modal fade" id="monthlyScheduleModal" tabindex="-1">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <form method="POST">
+                    <?php if (function_exists('csrf_field')) echo csrf_field(); ?>
+                    <input type="hidden" name="action" value="save_monthly_schedule">
+                    <input type="hidden" name="fiscal_year" value="<?= $selectedFy ?>">
+                    <div class="modal-header">
+                        <h5 class="modal-title fw-bold"><i class="fa-solid fa-calendar-week me-2"></i>Edit FY<?= $selectedFy ?> Monthly Budget Breakdown</h5>
+                        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
                     </div>
-                </div>
-                <div class="modal-footer">
-                    <button type="button" class="btn btn-light" data-bs-dismiss="modal">Cancel</button>
-                    <button type="submit" class="btn btn-primary">Save FY<?= $selectedFy ?> Schedule</button>
-                </div>
-            </form>
+                    <div class="modal-body">
+                        <p class="small text-muted mb-3">Specify exact <strong>pre-tax</strong> dollar amounts (in <strong><?= e($item['currency']) ?></strong>) for each month of Fiscal Year FY<?= $selectedFy ?>.</p>
+                        <div class="row g-3">
+                            <?php foreach ($fyMonthsOrder as $mNum):
+                                $val = isset($existingSchedule[$mNum]) ? $existingSchedule[$mNum] : ($fyCalc['has_custom_schedule'] ? 0.0 : $fyCalc['monthly_base']);
+                            ?>
+                                <div class="col-md-3">
+                                    <label class="form-label small fw-semibold mb-1"><?= $monthsNames[$mNum] ?> (Pre-Tax)</label>
+                                    <div class="input-group input-group-sm">
+                                        <span class="input-group-text">$</span>
+                                        <input type="number" step="0.01" name="monthly_amounts[<?= $mNum ?>]" class="form-control" value="<?= number_format($val, 2, '.', '') ?>" required>
+                                    </div>
+                                </div>
+                            <?php endforeach; ?>
+                        </div>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-light" data-bs-dismiss="modal">Cancel</button>
+                        <button type="submit" class="btn btn-primary">Save FY<?= $selectedFy ?> Schedule</button>
+                    </div>
+                </form>
+            </div>
         </div>
     </div>
-</div>
+<?php endif; ?>
 
 <!-- Upload Contract Modal -->
-<div class="modal fade" id="uploadContractModal" tabindex="-1">
-    <div class="modal-dialog">
-        <div class="modal-content">
-            <form method="POST" enctype="multipart/form-data">
-                <?php if (function_exists('csrf_field')) echo csrf_field(); ?>
-                <input type="hidden" name="action" value="upload_contract_files">
-                <div class="modal-header">
-                    <h5 class="modal-title fw-bold"><i class="fa-solid fa-upload me-2"></i>Upload Contract Documents</h5>
-                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-                </div>
-                <div class="modal-body">
-                    <div class="mb-3">
-                        <label class="form-label fw-semibold">Select Files (Multiple allowed)</label>
-                        <input type="file" name="contract_files[]" class="form-control" multiple required>
+<?php if (!$isFyLocked): ?>
+    <div class="modal fade" id="uploadContractModal" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <form method="POST" enctype="multipart/form-data">
+                    <?php if (function_exists('csrf_field')) echo csrf_field(); ?>
+                    <input type="hidden" name="action" value="upload_contract_files">
+                    <div class="modal-header">
+                        <h5 class="modal-title fw-bold"><i class="fa-solid fa-upload me-2"></i>Upload Contract Documents</h5>
+                        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
                     </div>
-                </div>
-                <div class="modal-footer">
-                    <button type="button" class="btn btn-light" data-bs-dismiss="modal">Cancel</button>
-                    <button type="submit" class="btn btn-primary">Upload Files</button>
-                </div>
-            </form>
+                    <div class="modal-body">
+                        <div class="mb-3">
+                            <label class="form-label fw-semibold">Select Files (Multiple allowed)</label>
+                            <input type="file" name="contract_files[]" class="form-control" multiple required>
+                        </div>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-light" data-bs-dismiss="modal">Cancel</button>
+                        <button type="submit" class="btn btn-primary">Upload Files</button>
+                    </div>
+                </form>
+            </div>
         </div>
     </div>
-</div>
+<?php endif; ?>

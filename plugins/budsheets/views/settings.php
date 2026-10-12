@@ -29,6 +29,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         } else {
             $error = 'Failed to update settings.';
         }
+    } elseif ($action === 'toggle_year_lock') {
+        $fyTarget = (int)($_POST['target_fy'] ?? 0);
+        $lockStatus = !empty($_POST['lock_status']);
+        if ($fyTarget) {
+            budsheets_set_fiscal_year_lock($fyTarget, $lockStatus);
+            $message = $lockStatus ? "Fiscal Year FY{$fyTarget} has been locked." : "Fiscal Year FY{$fyTarget} has been unlocked.";
+        }
     } elseif ($action === 'create_class') {
         $lob_ids = $_POST['lob_ids'] ?? [];
         $name = trim($_POST['name'] ?? '');
@@ -80,13 +87,15 @@ $monthsList = [
 ];
 
 $currentFy = budsheets_get_fiscal_year();
+$lockedFyList = budsheets_get_locked_fiscal_years();
+$startingFy = (int)($settings['starting_fiscal_year'] ?? $currentFy);
 ?>
 
 <div class="container-fluid py-4">
     <div class="d-flex justify-content-between align-items-center mb-4">
         <div>
             <h2 class="fw-bold text-dark mb-1"><i class="fa-solid fa-gear me-2 text-primary"></i>Plugin Settings & Configurations</h2>
-            <p class="text-muted small mb-0">Manage Fiscal Year boundaries, PST/GST tax rates, currency exchange rates to CAD, and Budget expense classes.</p>
+            <p class="text-muted small mb-0">Manage Fiscal Year boundaries, lock/unlock budget years, tax rates, currency exchange rates to CAD, and Budget expense classes.</p>
         </div>
     </div>
 
@@ -118,8 +127,12 @@ $currentFy = budsheets_get_fiscal_year();
 
                         <h6 class="fw-bold text-secondary mb-3"><i class="fa-solid fa-calendar-days me-1"></i>Financial / Fiscal Year Definition</h6>
                         <div class="row g-3 mb-4">
-                            <div class="col-6">
-                                <label class="form-label fw-semibold">Fiscal Year Start Month</label>
+                            <div class="col-4">
+                                <label class="form-label fw-semibold">Starting Year</label>
+                                <input type="number" min="2000" max="2100" name="starting_fiscal_year" class="form-control" value="<?= e($settings['starting_fiscal_year']) ?>" required>
+                            </div>
+                            <div class="col-4">
+                                <label class="form-label fw-semibold">Fiscal Start Month</label>
                                 <select name="fiscal_year_start_month" class="form-select" required>
                                     <?php foreach ($monthsList as $mNum => $mName): ?>
                                         <option value="<?= $mNum ?>" <?= ((int)$settings['fiscal_year_start_month'] === $mNum) ? 'selected' : '' ?>>
@@ -128,8 +141,8 @@ $currentFy = budsheets_get_fiscal_year();
                                     <?php endforeach; ?>
                                 </select>
                             </div>
-                            <div class="col-6">
-                                <label class="form-label fw-semibold">Start Day of Month</label>
+                            <div class="col-4">
+                                <label class="form-label fw-semibold">Start Day</label>
                                 <input type="number" min="1" max="28" name="fiscal_year_start_day" class="form-control" value="<?= e($settings['fiscal_year_start_day'] ?? 1) ?>" required>
                             </div>
                             <div class="col-12">
@@ -187,9 +200,63 @@ $currentFy = budsheets_get_fiscal_year();
             </div>
         </div>
 
-        <!-- Class Management Side Card -->
+        <!-- Budget Year Locking & Expense Class Management Side Column -->
         <div class="col-lg-6">
-            <div class="card border-0 shadow-sm h-100">
+            <!-- Budget Fiscal Year Lock Management Box -->
+            <div class="card border-0 shadow-sm mb-4">
+                <div class="card-header bg-white py-3">
+                    <h5 class="fw-bold mb-0 text-dark"><i class="fa-solid fa-lock me-2 text-danger"></i>Budget Year Lock Management</h5>
+                </div>
+                <div class="card-body p-0">
+                    <div class="p-3 bg-light border-bottom small text-muted">
+                        <i class="fa-solid fa-shield-halved me-1 text-primary"></i> Locking a budget fiscal year blocks modifications to basic item details and monthly budget schedules, while still permitting invoice recordings and document uploads.
+                    </div>
+                    <div class="table-responsive">
+                        <table class="table table-hover align-middle mb-0">
+                            <thead class="table-light">
+                                <tr>
+                                    <th class="ps-3">Fiscal Year</th>
+                                    <th>Status</th>
+                                    <th class="text-end pe-3">Action</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <?php
+                                $fyStartYearRange = min($startingFy, $currentFy - 2);
+                                $fyEndYearRange = max($startingFy + 5, $currentFy + 3);
+                                for ($y = $fyStartYearRange; $y <= $fyEndYearRange; $y++):
+                                    $isLocked = budsheets_is_fiscal_year_locked($y);
+                                ?>
+                                    <tr>
+                                        <td class="ps-3 fw-bold text-dark">FY<?= $y ?></td>
+                                        <td>
+                                            <?php if ($isLocked): ?>
+                                                <span class="badge bg-danger"><i class="fa-solid fa-lock me-1"></i>Locked</span>
+                                            <?php else: ?>
+                                                <span class="badge bg-success"><i class="fa-solid fa-lock-open me-1"></i>Active / Editable</span>
+                                            <?php endif; ?>
+                                        </td>
+                                        <td class="text-end pe-3">
+                                            <form method="POST" class="d-inline">
+                                                <?php if (function_exists('csrf_field')) echo csrf_field(); ?>
+                                                <input type="hidden" name="action" value="toggle_year_lock">
+                                                <input type="hidden" name="target_fy" value="<?= $y ?>">
+                                                <input type="hidden" name="lock_status" value="<?= $isLocked ? '0' : '1' ?>">
+                                                <button type="submit" class="btn btn-sm <?= $isLocked ? 'btn-outline-success' : 'btn-outline-danger' ?>">
+                                                    <i class="fa-solid <?= $isLocked ? 'fa-lock-open me-1' : 'fa-lock me-1' ?>"></i><?= $isLocked ? 'Unlock FY' . $y : 'Lock FY' . $y ?>
+                                                </button>
+                                            </form>
+                                        </td>
+                                    </tr>
+                                <?php endfor; ?>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Expense Classes Card -->
+            <div class="card border-0 shadow-sm">
                 <div class="card-header bg-white py-3 d-flex justify-content-between align-items-center">
                     <h5 class="fw-bold mb-0 text-dark"><i class="fa-solid fa-tags me-2 text-primary"></i>Configured Expense Classes</h5>
                     <button type="button" class="btn btn-sm btn-primary" data-bs-toggle="modal" data-bs-target="#addClassModal">

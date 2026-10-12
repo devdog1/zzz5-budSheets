@@ -219,14 +219,18 @@ echo "  ✓ Budgets CRUD & User assignment tests passed.\n";
 // Test 2: Tax, Currency Conversion & Fiscal Year Settings
 echo "[TEST] Testing tax, currency conversion & fiscal year determination logic...\n";
 budsheets_save_settings([
-    'gst_rate' => '5.0',
-    'pst_rate' => '7.0',
-    'rate_USD' => '1.35',
-    'rate_EUR' => '1.45',
-    'rate_CAD' => '1.0',
+    'starting_fiscal_year'    => '2024',
+    'gst_rate'                => '5.0',
+    'pst_rate'                => '7.0',
+    'rate_USD'                => '1.35',
+    'rate_EUR'                => '1.45',
+    'rate_CAD'                => '1.0',
     'fiscal_year_start_month' => '9',
     'fiscal_year_start_day'   => '1'
 ]);
+
+$settings = budsheets_get_settings();
+assert($settings['starting_fiscal_year'] === 2024, 'Starting fiscal year setting saved as 2024');
 
 // Sept 1, 2025 to Aug 31, 2026 includes Jan 1, 2026 -> FY2026
 $fy1 = budsheets_get_fiscal_year('2025-09-01');
@@ -247,7 +251,16 @@ $convertedCad = budsheets_convert_to_cad(100.00, 'USD');
 assert($convertedCad == 135.00, '$100 USD converts to $135.00 CAD at 1.35 rate');
 echo "  ✓ Tax, Currency conversion & Fiscal Year tests passed.\n";
 
-// Test 3: Expense Classes CRUD & Multi-Budget Assignment
+// Test 3: Budget Year Lock/Unlock Operations
+echo "[TEST] Testing Fiscal Year Locking functionality...\n";
+assert(budsheets_is_fiscal_year_locked(2025) === false, 'FY2025 initially unlocked');
+budsheets_set_fiscal_year_lock(2025, true);
+assert(budsheets_is_fiscal_year_locked(2025) === true, 'FY2025 locked successfully');
+budsheets_set_fiscal_year_lock(2025, false);
+assert(budsheets_is_fiscal_year_locked(2025) === false, 'FY2025 unlocked successfully');
+echo "  ✓ Fiscal Year Locking tests passed.\n";
+
+// Test 4: Expense Classes CRUD & Multi-Budget Assignment
 echo "[TEST] Testing Expense Classes operations & Multi-Budget associations...\n";
 $classId1 = budsheets_add_class([1, 2], 'Shared Software Subscriptions', 'SaaS and cloud software licenses used across IT and HR');
 $classId2 = budsheets_add_class(1, 'Hardware Purchase', 'Servers and laptops');
@@ -265,7 +278,7 @@ assert(count($allClasses) === 3, 'All classes count is 3');
 assert(count($allClasses[0]['lob_ids']) === 2, 'Shared class is assigned to 2 budgets');
 echo "  ✓ Multi-Budget Expense Classes tests passed.\n";
 
-// Test 4: File Extension Whitelisting
+// Test 5: File Extension Whitelisting
 echo "[TEST] Testing file extension whitelisting...\n";
 assert(budsheets_is_allowed_extension('contract.pdf') === true, 'PDF extension allowed');
 assert(budsheets_is_allowed_extension('invoice.png') === true, 'PNG extension allowed');
@@ -274,8 +287,8 @@ assert(budsheets_is_allowed_extension('script.phtml') === false, 'phtml extensio
 assert(budsheets_is_allowed_extension('malware.exe') === false, 'exe extension blocked');
 echo "  ✓ File extension security check tests passed.\n";
 
-// Test 5: Budget Item CRUD & FY Monthly Budget Schedules
-echo "[TEST] Testing Budget Item CRUD and FY Monthly Budget Schedules...\n";
+// Test 6: Budget Item CRUD, Annual Carry-over Isolation & FY Monthly Schedules
+echo "[TEST] Testing Budget Item CRUD, Annual Carry-over Isolation and FY Monthly Budget Schedules...\n";
 $itemData = [
     'lob_id'                => 1,
     'vendor'                => 'Microsoft',
@@ -290,8 +303,8 @@ $itemData = [
     'invoice_type'          => 'year',
     'invoice_date'          => '2026-01-01',
     'contract_start_date'   => '2026-01-01',
-    'contract_end_date'     => '2028-12-31',
-    'long_description'      => '3-Year Enterprise Agreement with Azure commitments.',
+    'contract_end_date'     => '2026-12-31',
+    'long_description'      => '1-Year Enterprise Agreement with Azure commitments.',
     'system_directory_link' => 'https://systems.domain.com/directory/azure-cloud'
 ];
 
@@ -300,6 +313,14 @@ assert($itemId > 0, 'Item should be saved and return valid ID');
 
 $savedItem = budsheets_get_item($itemId);
 assert((int)$savedItem['invoice_month'] === 5, 'Vendor invoice month should be saved as 5 (May)');
+
+// FY2026 is in contract range -> gets $12,000 base
+$fy2026Calc = budsheets_calculate_item_fy_cost(budsheets_get_item($itemId), 2026);
+assert($fy2026Calc['annual_base'] == 12000.00, 'FY2026 annual schedule total base is $12,000');
+
+// FY2030 is outside contract range without explicit schedule -> base is $0 (NOT carried over)
+$fy2030Calc = budsheets_calculate_item_fy_cost(budsheets_get_item($itemId), 2030);
+assert($fy2030Calc['annual_base'] == 0.00, 'FY2030 financial info is not auto-filled / carried over');
 
 // Save custom monthly schedule for FY2026
 $monthlyBreakdown = [
@@ -313,12 +334,14 @@ $savedSched = budsheets_get_item_monthly_schedule($itemId, 2026);
 assert(count($savedSched) === 12, '12 months in saved schedule');
 assert($savedSched[1] == 1500, 'Jan amount is 1500');
 
-$fyCostCalc = budsheets_calculate_item_fy_cost(budsheets_get_item($itemId), 2026);
-assert($fyCostCalc['annual_base'] == 12000.00, 'FY2026 annual schedule total base is $12,000');
-echo "  ✓ Budget Item CRUD and FY Monthly Schedule tests passed.\n";
+echo "  ✓ Budget Item CRUD, Carry-over Isolation, and FY Monthly Schedule tests passed.\n";
 
-// Test 6: Invoices CRUD & CAD Conversion Summary
-echo "[TEST] Testing Invoices operations and CAD summary totals...\n";
+// Test 7: Invoices CRUD on Locked Fiscal Years & CAD Summary
+echo "[TEST] Testing Invoices operations on locked fiscal years and CAD summary totals...\n";
+
+// Lock FY2026
+budsheets_set_fiscal_year_lock(2026, true);
+
 $invData1 = [
     'item_id'        => $itemId,
     'invoice_number' => 'INV-2026-001',
@@ -328,10 +351,15 @@ $invData1 = [
     'period_year'    => '2026',
     'period_month'   => '1',
     'payment_date'   => '2026-01-15',
-    'comments'       => 'January Cloud Invoice Paid'
+    'comments'       => 'January Cloud Invoice Paid on Locked Year'
 ];
 
+// Invoices ARE allowed on locked years
 $invId1 = budsheets_save_invoice($invData1);
+assert($invId1 > 0, 'Invoice can be recorded on a locked fiscal year');
+
+// Unlock FY2026
+budsheets_set_fiscal_year_lock(2026, false);
 
 $invData2 = [
     'item_id'        => $itemId,
@@ -352,9 +380,9 @@ assert(count($invoices) === 2, 'Item should have 2 invoices');
 
 $summary = budsheets_get_dashboard_summary();
 assert($summary['total_invoiced_cad'] == 2700.00, 'Total invoiced sum in CAD ($2000 USD * 1.35) is $2700.00 CAD');
-echo "  ✓ Invoices CRUD & CAD summary tests passed.\n";
+echo "  ✓ Invoices CRUD on locked fiscal years & CAD summary tests passed.\n";
 
-// Test 7: Dynamic Routes & Hooks Verification
+// Test 8: Dynamic Routes & Hooks Verification
 echo "[TEST] Verifying plugin hooks and registered routes...\n";
 assert(isset($registered_routes['budsheets_dashboard']), 'Route budsheets_dashboard is registered');
 assert(isset($registered_routes['budsheets_lobs']), 'Route budsheets_lobs is registered');

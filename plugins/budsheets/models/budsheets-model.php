@@ -183,11 +183,12 @@ function budsheets_is_allowed_extension($filename) {
 }
 
 // ==========================================
-// Tax, Currency Exchange & Fiscal Year Settings
+// Tax, Currency Exchange, Starting Year & Lock Settings
 // ==========================================
 
 function budsheets_get_settings() {
     $defaultSettings = [
+        'starting_fiscal_year'     => (int)date('Y'),
         'gst_rate'                 => 5.0,
         'pst_rate'                 => 7.0,
         'rate_CAD'                 => 1.0,
@@ -208,6 +209,7 @@ function budsheets_get_settings() {
             $settings[$key] = $default;
         }
     }
+    $settings['starting_fiscal_year'] = (int)($settings['starting_fiscal_year'] ?? date('Y'));
     return $settings;
 }
 
@@ -215,7 +217,7 @@ function budsheets_save_settings($data) {
     if (!function_exists('set_plugin_setting')) return false;
 
     $fields = [
-        'gst_rate', 'pst_rate', 'rate_CAD', 'rate_USD', 'rate_EUR', 'rate_GBP', 'rate_AUD',
+        'starting_fiscal_year', 'gst_rate', 'pst_rate', 'rate_CAD', 'rate_USD', 'rate_EUR', 'rate_GBP', 'rate_AUD',
         'fiscal_year_start_month', 'fiscal_year_start_day'
     ];
     foreach ($fields as $f) {
@@ -224,6 +226,47 @@ function budsheets_save_settings($data) {
         }
     }
     return true;
+}
+
+/**
+ * Get list of locked fiscal years
+ */
+function budsheets_get_locked_fiscal_years() {
+    if (function_exists('get_plugin_setting')) {
+        $val = get_plugin_setting('budsheets', 'locked_fiscal_years', '[]');
+        $arr = json_decode($val, true);
+        return is_array($arr) ? array_map('intval', $arr) : [];
+    }
+    return [];
+}
+
+/**
+ * Check if a given fiscal year is locked
+ */
+function budsheets_is_fiscal_year_locked($fiscal_year) {
+    $lockedYears = budsheets_get_locked_fiscal_years();
+    return in_array((int)$fiscal_year, $lockedYears, true);
+}
+
+/**
+ * Set lock status for a fiscal year
+ */
+function budsheets_set_fiscal_year_lock($fiscal_year, $isLocked) {
+    if (!function_exists('set_plugin_setting')) return false;
+
+    $fy = (int)$fiscal_year;
+    $lockedYears = budsheets_get_locked_fiscal_years();
+
+    if ($isLocked) {
+        if (!in_array($fy, $lockedYears, true)) {
+            $lockedYears[] = $fy;
+        }
+    } else {
+        $lockedYears = array_diff($lockedYears, [$fy]);
+    }
+
+    sort($lockedYears);
+    return set_plugin_setting('budsheets', 'locked_fiscal_years', json_encode(array_values($lockedYears)));
 }
 
 /**
@@ -360,6 +403,10 @@ function budsheets_get_item_monthly_schedule($item_id, $fiscal_year) {
 }
 
 function budsheets_save_item_monthly_schedule($item_id, $fiscal_year, $monthly_amounts) {
+    if (budsheets_is_fiscal_year_locked($fiscal_year)) {
+        die("Access Denied: Fiscal Year FY{$fiscal_year} is locked. Budget schedules cannot be modified.");
+    }
+
     $item = budsheets_get_item($item_id);
     if (!$item) {
         die('Access Denied: Target item not found or access restricted.');
@@ -389,7 +436,9 @@ function budsheets_save_item_monthly_schedule($item_id, $fiscal_year, $monthly_a
 }
 
 /**
- * Calculates item cost and tax for a specific fiscal year taking monthly schedule into account
+ * Calculates item cost and tax for a specific fiscal year.
+ * Rule: Financial info is NOT auto-filled / carried over from year to year unless
+ * an explicit schedule exists for that fiscal year OR if it matches the item's initial created fiscal year (or active contract range).
  */
 function budsheets_calculate_item_fy_cost($item, $fiscal_year = null) {
     if (!$fiscal_year) {
@@ -407,7 +456,27 @@ function budsheets_calculate_item_fy_cost($item, $fiscal_year = null) {
         return $calc;
     }
 
-    $calc = budsheets_calculate_item_cost_and_tax((float)$item['monthly_cost'], $item['billing_frequency'] ?? 'monthly', $item['tax_type']);
+    $createdFy = budsheets_get_fiscal_year($item['contract_start_date'] ?: ($item['created_at'] ?? null));
+
+    $isInitialOrContractYear = ($fiscal_year == $createdFy);
+
+    if (!empty($item['contract_start_date']) && !empty($item['contract_end_date'])) {
+        $startFy = budsheets_get_fiscal_year($item['contract_start_date']);
+        $endFy = budsheets_get_fiscal_year($item['contract_end_date']);
+        if ($fiscal_year >= $startFy && $fiscal_year <= $endFy) {
+            $isInitialOrContractYear = true;
+        }
+    }
+
+    if ($isInitialOrContractYear) {
+        $calc = budsheets_calculate_item_cost_and_tax((float)$item['monthly_cost'], $item['billing_frequency'] ?? 'monthly', $item['tax_type']);
+        $calc['monthly_schedule'] = [];
+        $calc['has_custom_schedule'] = false;
+        return $calc;
+    }
+
+    // Do NOT auto fill / carry over financial info to unallocated fiscal years
+    $calc = budsheets_calculate_item_cost_and_tax(0.00, 'monthly', $item['tax_type']);
     $calc['monthly_schedule'] = [];
     $calc['has_custom_schedule'] = false;
     return $calc;
@@ -749,6 +818,17 @@ function budsheets_save_item($data, $item_id = null) {
         die('Access Denied: You do not have permissions for this Budget.');
     }
 
+    if ($item_id) {
+        $existing = budsheets_get_item($item_id);
+        if (!$existing) {
+            die('Access Denied: Target item not found or access restricted.');
+        }
+        $itemFy = budsheets_get_fiscal_year($existing['contract_start_date'] ?: ($existing['created_at'] ?? null));
+        if (budsheets_is_fiscal_year_locked($itemFy)) {
+            die("Access Denied: Fiscal Year FY{$itemFy} is locked. Basic item details cannot be modified.");
+        }
+    }
+
     $table = $pdb->getTableName('items');
     $userId = $_SESSION['user_id'] ?? null;
 
@@ -775,11 +855,6 @@ function budsheets_save_item($data, $item_id = null) {
     ];
 
     if ($item_id) {
-        $existing = budsheets_get_item($item_id);
-        if (!$existing) {
-            die('Access Denied: Target item not found or access restricted.');
-        }
-
         $sql = "UPDATE {$table} SET
                     lob_id = ?, vendor = ?, product = ?, currency = ?, monthly_cost = ?,
                     billing_frequency = ?, invoice_month = ?, tax_type = ?, class = ?, description = ?, invoice_type = ?, invoice_date = ?,
@@ -802,6 +877,11 @@ function budsheets_delete_item($id) {
     $item = budsheets_get_item($id);
     if (!$item) {
         die('Access Denied: Budget item not found or access restricted.');
+    }
+
+    $itemFy = budsheets_get_fiscal_year($item['contract_start_date'] ?: ($item['created_at'] ?? null));
+    if (budsheets_is_fiscal_year_locked($itemFy)) {
+        die("Access Denied: Fiscal Year FY{$itemFy} is locked. Budget item cannot be deleted.");
     }
 
     $pdb = budsheets_db();
@@ -1211,7 +1291,7 @@ function budsheets_export_items_csv() {
         // Append per-month values for the financial year
         $defaultMonthlyBase = ($item['billing_frequency'] === 'yearly') ? ((float)$item['monthly_cost'] / 12.0) : (float)$item['monthly_cost'];
         foreach ($fyMonthsOrder as $mNum) {
-            $mAmount = isset($costCalc['monthly_schedule'][$mNum]) ? $costCalc['monthly_schedule'][$mNum] : $defaultMonthlyBase;
+            $mAmount = isset($costCalc['monthly_schedule'][$mNum]) ? $costCalc['monthly_schedule'][$mNum] : ($costCalc['has_custom_schedule'] ? 0.0 : $defaultMonthlyBase);
             $mTax = budsheets_calculate_tax($mAmount, $item['tax_type'], 'monthly');
             $mCad = budsheets_convert_to_cad($mTax['total'], $item['currency']);
             $row[] = number_format($mCad, 2, '.', '');
