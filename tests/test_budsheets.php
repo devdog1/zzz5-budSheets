@@ -488,4 +488,24 @@ assert(isset($registered_actions['index_dashboard_widgets']), 'index_dashboard_w
 
 echo "  ✓ Framework hooks & route verification tests passed.\n";
 
+// Test 12: View Structure & FY -> Budget -> Item Hierarchy & Access Filtering
+echo "[TEST] Testing Financial Year -> Budget -> Item View Hierarchy & Access Filtering...\n";
+$fy2026Lobs = budsheets_get_lobs(null, 2026);
+$fy2027Lobs = budsheets_get_lobs(null, 2027);
+assert(count($fy2026Lobs) === 2, '2 Budgets in FY2026');
+assert(count($fy2027Lobs) === 2, '2 Budgets in FY2027 (cloned ones)');
+
+$fy2026Items = budsheets_get_items(null, 2026);
+$fy2027Items = budsheets_get_items(null, 2027);
+assert(count($fy2026Items) === 1, '1 Item in FY2026');
+assert(count($fy2027Items) === 2, '2 Cloned Items in FY2027');
+
+$summary2026 = budsheets_get_dashboard_summary(2026);
+assert($summary2026['lob_count'] === 2 && $summary2026['item_count'] === 1, 'FY2026 Dashboard summary correctly isolated');
+
+$summary2027 = budsheets_get_dashboard_summary(2027);
+assert($summary2027['lob_count'] === 2 && $summary2027['item_count'] === 2, 'FY2027 Dashboard summary correctly isolated');
+
+echo "  ✓ View structure & FY -> Budget -> Item hierarchy tests passed.\n";
+
 echo "\nALL BUDSHEETS PLUGIN TESTS PASSED SUCCESSFULLY!\n";

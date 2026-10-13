@@ -16,6 +16,8 @@ $error = '';
 $systemUsers = budsheets_get_all_system_users();
 $managedFys = budsheets_get_managed_fiscal_years();
 $currentFy = budsheets_get_fiscal_year();
+$filterFyParam = $_GET['fy'] ?? null;
+$selectedFy = ($filterFyParam === 'all') ? null : (isset($filterFyParam) && $filterFyParam !== '' ? (int)$filterFyParam : $currentFy);
 $currentUserId = $_SESSION['user_id'] ?? 0;
 
 // Handle Actions
@@ -103,18 +105,41 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 }
 
-$lobs = budsheets_get_lobs();
+$lobs = budsheets_get_lobs(null, $selectedFy);
 ?>
 
 <div class="container-fluid py-4">
-    <div class="d-flex justify-content-between align-items-center mb-4">
+    <div class="d-flex justify-content-between align-items-center mb-4 flex-wrap gap-3">
         <div>
             <h2 class="fw-bold text-dark mb-1"><i class="fa-solid fa-sitemap me-2 text-primary"></i>Budgets</h2>
             <p class="text-muted small mb-0">Manage organizational budgets assigned to single financial years, clone budgets, post comments, and configure user access permissions.</p>
         </div>
-        <button type="button" class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#addLobModal">
-            <i class="fa-solid fa-plus me-1"></i> Add Budget
-        </button>
+        <div class="d-flex align-items-center flex-wrap gap-2">
+            <!-- Filter Bar for Financial Year -->
+            <form method="GET" class="d-flex align-items-center me-2">
+                <input type="hidden" name="route" value="budsheets_lobs">
+                <label for="fy_filter" class="form-label mb-0 me-2 fw-semibold text-muted small"><i class="fa-solid fa-calendar-days me-1"></i>Financial Year:</label>
+                <select name="fy" id="fy_filter" class="form-select form-select-sm fw-bold border-primary text-primary" onchange="this.form.submit()">
+                    <option value="all" <?= $filterFyParam === 'all' ? 'selected' : '' ?>>-- All Financial Years --</option>
+                    <?php
+                    $fyYears = array_column($managedFys, 'year');
+                    if (!in_array($currentFy, $fyYears)) {
+                        $fyYears[] = $currentFy;
+                    }
+                    rsort($fyYears);
+                    foreach (array_unique($fyYears) as $y):
+                    ?>
+                        <option value="<?= $y ?>" <?= ($selectedFy !== null && $y === $selectedFy) ? 'selected' : '' ?>>
+                            FY<?= $y ?><?= $y === $currentFy ? ' (Current)' : '' ?>
+                        </option>
+                    <?php endforeach; ?>
+                </select>
+            </form>
+
+            <button type="button" class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#addLobModal">
+                <i class="fa-solid fa-plus me-1"></i> Add Budget
+            </button>
+        </div>
     </div>
 
     <?php if ($message): ?>
@@ -412,7 +437,7 @@ $lobs = budsheets_get_lobs();
                             <label class="form-label fw-semibold">Financial Year <span class="text-danger">*</span></label>
                             <select name="fiscal_year" class="form-select" required>
                                 <?php foreach ($managedFys as $fy): ?>
-                                    <option value="<?= (int)$fy['year'] ?>" <?= $currentFy === (int)$fy['year'] ? 'selected' : '' ?>>
+                                    <option value="<?= (int)$fy['year'] ?>" <?= ($selectedFy !== null ? $selectedFy : $currentFy) === (int)$fy['year'] ? 'selected' : '' ?>>
                                         FY<?= (int)$fy['year'] ?>
                                     </option>
                                 <?php endforeach; ?>

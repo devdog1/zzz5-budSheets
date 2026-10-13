@@ -766,23 +766,33 @@ function budsheets_delete_comment($comment_id) {
 // Budgets / Lines of Business (LOB) Operations
 // ==========================================
 
-function budsheets_get_lobs($user_id = null) {
+function budsheets_get_lobs($user_id = null, $fiscal_year = null) {
     $pdb = budsheets_db();
     if (!$pdb) return [];
     $table = $pdb->getTableName('lines_of_business');
     $userLobTable = $pdb->getTableName('lob_users');
 
-    if (has_permission('budsheets_admin')) {
-        return $pdb->query("SELECT * FROM {$table} ORDER BY name ASC")->fetchAll();
+    $where = [];
+    $params = [];
+
+    if (!has_permission('budsheets_admin')) {
+        $currentUserId = ($user_id !== null) ? $user_id : ($_SESSION['user_id'] ?? 0);
+        $where[] = "(l.id IN (SELECT lob_id FROM {$userLobTable} WHERE user_id = ?) OR l.id NOT IN (SELECT DISTINCT lob_id FROM {$userLobTable}))";
+        $params[] = (int)$currentUserId;
     }
 
-    $currentUserId = ($user_id !== null) ? $user_id : ($_SESSION['user_id'] ?? 0);
-    $sql = "SELECT l.*
-            FROM {$table} l
-            WHERE l.id IN (SELECT lob_id FROM {$userLobTable} WHERE user_id = ?)
-               OR l.id NOT IN (SELECT DISTINCT lob_id FROM {$userLobTable})
-            ORDER BY l.name ASC";
-    return $pdb->query($sql, [(int)$currentUserId])->fetchAll();
+    if ($fiscal_year !== null && $fiscal_year !== '') {
+        $where[] = "l.fiscal_year = ?";
+        $params[] = (int)$fiscal_year;
+    }
+
+    $sql = "SELECT l.* FROM {$table} l";
+    if (!empty($where)) {
+        $sql .= " WHERE " . implode(" AND ", $where);
+    }
+    $sql .= " ORDER BY l.name ASC";
+
+    return $pdb->query($sql, $params)->fetchAll();
 }
 
 function budsheets_user_has_lob_access($lob_id, $user_id = null) {
@@ -1122,7 +1132,7 @@ function budsheets_delete_class($id) {
 // Budget Items Operations
 // ==========================================
 
-function budsheets_get_items($lob_id = null) {
+function budsheets_get_items($lob_id = null, $fiscal_year = null) {
     $pdb = budsheets_db();
     if (!$pdb) return [];
     $itemsTable = $pdb->getTableName('items');
@@ -1138,6 +1148,11 @@ function budsheets_get_items($lob_id = null) {
     if ($lob_id) {
         $where[] = "i.lob_id = ?";
         $params[] = (int)$lob_id;
+    }
+
+    if ($fiscal_year !== null && $fiscal_year !== '') {
+        $where[] = "l.fiscal_year = ?";
+        $params[] = (int)$fiscal_year;
     }
 
     if (!has_permission('budsheets_admin')) {
@@ -1475,14 +1490,20 @@ function budsheets_delete_invoice($invoice_id) {
 // Dashboard & Summary Helper (All CAD)
 // ==========================================
 
-function budsheets_get_dashboard_summary() {
+function budsheets_get_dashboard_summary($fiscal_year = null) {
     $pdb = budsheets_db();
     if (!$pdb) {
         return ['lob_count' => 0, 'item_count' => 0, 'total_invoiced_cad' => 0, 'monthly_cost_cad' => 0, 'annual_cost_cad' => 0];
     }
 
-    $lobs = budsheets_get_lobs();
-    $items = budsheets_get_items();
+    if ($fiscal_year === null || $fiscal_year === '') {
+        $fiscal_year = budsheets_get_fiscal_year();
+    } else {
+        $fiscal_year = (int)$fiscal_year;
+    }
+
+    $lobs = budsheets_get_lobs(null, $fiscal_year);
+    $items = budsheets_get_items(null, $fiscal_year);
     $invTable = $pdb->getTableName('invoices');
 
     $lobCount = count($lobs);
@@ -1499,12 +1520,11 @@ function budsheets_get_dashboard_summary() {
         }
     }
 
-    $fy = budsheets_get_fiscal_year();
     $monthlyCostCad = 0.0;
     $annualCostCad = 0.0;
 
     foreach ($items as $item) {
-        $itemFy = !empty($item['lob_fiscal_year']) ? (int)$item['lob_fiscal_year'] : $fy;
+        $itemFy = !empty($item['lob_fiscal_year']) ? (int)$item['lob_fiscal_year'] : $fiscal_year;
         $fyCalc = budsheets_calculate_item_fy_cost($item, $itemFy);
         $monthlyCostCad += budsheets_convert_to_cad($fyCalc['monthly_total'], $item['currency'], $itemFy);
         $annualCostCad += budsheets_convert_to_cad($fyCalc['annual_total'], $item['currency'], $itemFy);
@@ -1591,9 +1611,9 @@ function budsheets_handle_file_download() {
 
 function budsheets_export_items_csv() {
     $lob_id = isset($_GET['lob_id']) && $_GET['lob_id'] !== '' ? (int)$_GET['lob_id'] : null;
-    $fy = isset($_GET['fy']) ? (int)$_GET['fy'] : budsheets_get_fiscal_year();
+    $fy = isset($_GET['fy']) && $_GET['fy'] !== '' ? (int)$_GET['fy'] : budsheets_get_fiscal_year();
 
-    $items = budsheets_get_items($lob_id);
+    $items = budsheets_get_items($lob_id, $fy);
     $fyMonthsOrder = budsheets_get_fiscal_year_months();
 
     $monthsNames = [

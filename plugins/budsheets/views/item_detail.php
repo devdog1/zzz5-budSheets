@@ -22,7 +22,7 @@ $message = '';
 $error = '';
 
 $currentFy = budsheets_get_fiscal_year();
-$selectedFy = isset($_GET['fy']) ? (int)$_GET['fy'] : $currentFy;
+$selectedFy = isset($_GET['fy']) && $_GET['fy'] !== '' ? (int)$_GET['fy'] : (!empty($item['lob_fiscal_year']) ? (int)$item['lob_fiscal_year'] : $currentFy);
 $isFyLocked = budsheets_is_fiscal_year_locked($selectedFy);
 
 $itemStartFy = !empty($item['lob_fiscal_year']) ? (int)$item['lob_fiscal_year'] : budsheets_get_fiscal_year($item['contract_start_date'] ?: ($item['created_at'] ?? null));
@@ -153,6 +153,7 @@ $currentUserId = $_SESSION['user_id'] ?? 0;
         <div>
             <div class="text-muted small fw-semibold text-uppercase mb-1">
                 <i class="fa-solid fa-sitemap me-1"></i><?= e($item['lob_name']) ?>
+                <span class="badge bg-primary-subtle text-primary border border-primary-subtle ms-2">FY<?= (int)($item['lob_fiscal_year'] ?: $currentFy) ?> Budget</span>
             </div>
             <h2 class="fw-bold text-dark mb-0"><?= e($item['vendor']) ?> - <?= e($item['product']) ?></h2>
         </div>
