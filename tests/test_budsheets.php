@@ -91,11 +91,20 @@ class PluginDatabase {
 
 // Initialize test DB schema (adapted for SQLite memory)
 $pdb = new PluginDatabase('budsheets');
+
+$pdb->query("CREATE TABLE plug_budsheets_fiscal_years (
+    year INTEGER PRIMARY KEY,
+    is_hidden INTEGER DEFAULT 0,
+    is_locked INTEGER DEFAULT 0,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);");
+
 $pdb->query("CREATE TABLE plug_budsheets_lines_of_business (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT NOT NULL,
     code TEXT,
     description TEXT,
+    fiscal_year INTEGER,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );");
@@ -189,13 +198,31 @@ echo "[TEST] Database tables initialized successfully.\n";
 // Load Plugin Entry File and Models
 require_once __DIR__ . '/../plugins/budsheets/plugin.php';
 
-// Test 1: Lines of Business / Budgets CRUD & User Assignments
-echo "[TEST] Testing Budgets operations & user assignments...\n";
-budsheets_add_lob('Information Technology', 'IT', 'IT Infrastructure and Software', [10, 11]);
-budsheets_add_lob('Human Resources', 'HR', 'HR Services', [12]);
+// Test 1: Managed Financial Years (Add, Hide, Remove)
+echo "[TEST] Testing Financial Years Management (Add, Hide, Remove)...\n";
+budsheets_add_fiscal_year(2028);
+$fys = budsheets_get_managed_fiscal_years(true);
+$fyYears = array_column($fys, 'year');
+assert(in_array(2028, $fyYears), 'FY2028 added successfully');
+
+budsheets_hide_fiscal_year(2028, true);
+$visibleFys = budsheets_get_managed_fiscal_years(false);
+$visibleYears = array_column($visibleFys, 'year');
+assert(!in_array(2028, $visibleYears), 'FY2028 hidden from visible years');
+
+budsheets_remove_fiscal_year(2028);
+$allFysAfterRemove = budsheets_get_managed_fiscal_years(true);
+assert(!in_array(2028, array_column($allFysAfterRemove, 'year')), 'FY2028 removed successfully');
+echo "  ✓ Financial Years Management tests passed.\n";
+
+// Test 2: Lines of Business / Budgets CRUD & FY Assignment & User Access
+echo "[TEST] Testing Budgets operations, Single-FY Assignment & User Access...\n";
+budsheets_add_lob('Information Technology 2026', 'IT-26', 'IT Infrastructure FY26', [10, 11], 2026);
+budsheets_add_lob('Human Resources 2026', 'HR-26', 'HR Services FY26', [12], 2026);
 
 $lobs = budsheets_get_lobs();
 assert(count($lobs) === 2, 'Should return 2 Budgets for admin');
+assert((int)$lobs[0]['fiscal_year'] === 2026, 'IT Budget assigned to FY2026');
 
 $itUsers = budsheets_get_lob_users(1);
 assert(count($itUsers) === 2, 'IT Budget should have 2 assigned users');
@@ -211,12 +238,12 @@ assert(count($hrUserLobs) === 2, 'Non-admin user 12 sees assigned HR Budget and 
 $user_permissions = ['budsheets_view', 'budsheets_edit', 'budsheets_admin'];
 $_SESSION['user_id'] = 1;
 
-budsheets_update_lob(1, 'InfoTech', 'IT-UPDATED', 'Updated description', [10]);
+budsheets_update_lob(1, 'InfoTech 2026', 'IT-UPDATED', 'Updated description', [10], 2026);
 $updatedUsers = budsheets_get_lob_users(1);
 assert(count($updatedUsers) === 1 && $updatedUsers[0] == 10, 'IT Budget updated user assignment');
-echo "  ✓ Budgets CRUD & User assignment tests passed.\n";
+echo "  ✓ Budgets CRUD & Single-FY assignment tests passed.\n";
 
-// Test 2: Tax, Currency Conversion & Fiscal Year Settings
+// Test 3: Tax, Currency Conversion & Fiscal Year Settings
 echo "[TEST] Testing tax, currency conversion & fiscal year determination logic...\n";
 budsheets_save_settings([
     'starting_fiscal_year'    => '2024',
@@ -251,7 +278,7 @@ $convertedCad = budsheets_convert_to_cad(100.00, 'USD');
 assert($convertedCad == 135.00, '$100 USD converts to $135.00 CAD at 1.35 rate');
 echo "  ✓ Tax, Currency conversion & Fiscal Year tests passed.\n";
 
-// Test 3: Budget Year Lock/Unlock Operations
+// Test 4: Budget Year Lock/Unlock Operations
 echo "[TEST] Testing Fiscal Year Locking functionality...\n";
 assert(budsheets_is_fiscal_year_locked(2025) === false, 'FY2025 initially unlocked');
 budsheets_set_fiscal_year_lock(2025, true);
@@ -260,7 +287,7 @@ budsheets_set_fiscal_year_lock(2025, false);
 assert(budsheets_is_fiscal_year_locked(2025) === false, 'FY2025 unlocked successfully');
 echo "  ✓ Fiscal Year Locking tests passed.\n";
 
-// Test 4: Expense Classes CRUD & Multi-Budget Assignment
+// Test 5: Expense Classes CRUD & Multi-Budget Assignment
 echo "[TEST] Testing Expense Classes operations & Multi-Budget associations...\n";
 $classId1 = budsheets_add_class([1, 2], 'Shared Software Subscriptions', 'SaaS and cloud software licenses used across IT and HR');
 $classId2 = budsheets_add_class(1, 'Hardware Purchase', 'Servers and laptops');
@@ -278,7 +305,7 @@ assert(count($allClasses) === 3, 'All classes count is 3');
 assert(count($allClasses[0]['lob_ids']) === 2, 'Shared class is assigned to 2 budgets');
 echo "  ✓ Multi-Budget Expense Classes tests passed.\n";
 
-// Test 5: File Extension Whitelisting
+// Test 6: File Extension Whitelisting
 echo "[TEST] Testing file extension whitelisting...\n";
 assert(budsheets_is_allowed_extension('contract.pdf') === true, 'PDF extension allowed');
 assert(budsheets_is_allowed_extension('invoice.png') === true, 'PNG extension allowed');
@@ -287,7 +314,7 @@ assert(budsheets_is_allowed_extension('script.phtml') === false, 'phtml extensio
 assert(budsheets_is_allowed_extension('malware.exe') === false, 'exe extension blocked');
 echo "  ✓ File extension security check tests passed.\n";
 
-// Test 6: Budget Item CRUD, Annual Carry-over Isolation & FY Monthly Schedules
+// Test 7: Budget Item CRUD, Annual Carry-over Isolation & FY Monthly Schedules
 echo "[TEST] Testing Budget Item CRUD, Annual Carry-over Isolation and FY Monthly Budget Schedules...\n";
 $itemData = [
     'lob_id'                => 1,
@@ -336,7 +363,34 @@ assert($savedSched[1] == 1500, 'Jan amount is 1500');
 
 echo "  ✓ Budget Item CRUD, Carry-over Isolation, and FY Monthly Schedule tests passed.\n";
 
-// Test 7: Invoices CRUD on Locked Fiscal Years & CAD Summary
+// Test 8: Full vs Soft Budget Cloning
+echo "[TEST] Testing Budget Full Clone and Soft Clone functionality...\n";
+
+// Full Clone IT Budget (1) to FY2027
+$fullCloneId = budsheets_clone_budget(1, 'InfoTech 2027 Full', 'IT-27-F', 2027, 'full');
+assert($fullCloneId > 0, 'Full budget clone created successfully');
+
+$fullClonedItems = budsheets_get_items($fullCloneId);
+assert(count($fullClonedItems) === 1, 'Full cloned budget has 1 item');
+assert((float)$fullClonedItems[0]['monthly_cost'] === 12000.00, 'Full cloned item retains monthly cost');
+
+$fullClonedSched = budsheets_get_item_monthly_schedule($fullClonedItems[0]['id'], 2027);
+assert(count($fullClonedSched) === 12 && $fullClonedSched[1] == 1500, 'Full cloned item retains schedule breakdown for FY2027');
+
+// Soft Clone IT Budget (1) to FY2027
+$softCloneId = budsheets_clone_budget(1, 'InfoTech 2027 Soft', 'IT-27-S', 2027, 'soft');
+assert($softCloneId > 0, 'Soft budget clone created successfully');
+
+$softClonedItems = budsheets_get_items($softCloneId);
+assert(count($softClonedItems) === 1, 'Soft cloned budget has 1 item');
+assert((float)$softClonedItems[0]['monthly_cost'] === 0.00, 'Soft cloned item resets monthly cost to $0.00');
+
+$softClonedSched = budsheets_get_item_monthly_schedule($softClonedItems[0]['id'], 2027);
+assert(empty($softClonedSched), 'Soft cloned item has no financial schedule');
+
+echo "  ✓ Full vs Soft Budget Cloning tests passed.\n";
+
+// Test 9: Invoices CRUD on Locked Fiscal Years & CAD Summary
 echo "[TEST] Testing Invoices operations on locked fiscal years and CAD summary totals...\n";
 
 // Lock FY2026
@@ -382,7 +436,7 @@ $summary = budsheets_get_dashboard_summary();
 assert($summary['total_invoiced_cad'] == 2700.00, 'Total invoiced sum in CAD ($2000 USD * 1.35) is $2700.00 CAD');
 echo "  ✓ Invoices CRUD on locked fiscal years & CAD summary tests passed.\n";
 
-// Test 8: Dynamic Routes & Hooks Verification
+// Test 10: Dynamic Routes & Hooks Verification
 echo "[TEST] Verifying plugin hooks and registered routes...\n";
 assert(isset($registered_routes['budsheets_dashboard']), 'Route budsheets_dashboard is registered');
 assert(isset($registered_routes['budsheets_lobs']), 'Route budsheets_lobs is registered');

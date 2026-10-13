@@ -120,26 +120,28 @@ $currFy = budsheets_get_fiscal_year();
                         <tr>
                             <th class="ps-3">Budget</th>
                             <th>Code</th>
+                            <th>Financial Year</th>
                             <th class="text-center">Assigned Items</th>
                             <th>Monthly Avg Pre-Tax (CAD)</th>
                             <th>Monthly Avg w/ Tax (CAD)</th>
-                            <th>FY<?= $currFy ?> Annual Total w/ Tax (CAD)</th>
+                            <th>Annual Total w/ Tax (CAD)</th>
                             <th class="text-end pe-3">Action</th>
                         </tr>
                     </thead>
                     <tbody>
                         <?php if (empty($lobs)): ?>
                             <tr>
-                                <td colspan="7" class="text-center py-4 text-muted">No Budgets defined yet.</td>
+                                <td colspan="8" class="text-center py-4 text-muted">No Budgets defined yet.</td>
                             </tr>
                         <?php else: ?>
                             <?php foreach ($lobs as $lob):
                                 $lobItems = array_filter($items, function($i) use ($lob) { return $i['lob_id'] == $lob['id']; });
+                                $lobFy = !empty($lob['fiscal_year']) ? (int)$lob['fiscal_year'] : $currFy;
                                 $lobMonthlyBaseCad = 0.0;
                                 $lobMonthlyTotalCad = 0.0;
                                 $lobAnnualTotalCad = 0.0;
                                 foreach ($lobItems as $li) {
-                                    $fyCalc = budsheets_calculate_item_fy_cost($li, $currFy);
+                                    $fyCalc = budsheets_calculate_item_fy_cost($li, $lobFy);
                                     $lobMonthlyBaseCad += budsheets_convert_to_cad($fyCalc['monthly_base'], $li['currency']);
                                     $lobMonthlyTotalCad += budsheets_convert_to_cad($fyCalc['monthly_total'], $li['currency']);
                                     $lobAnnualTotalCad += budsheets_convert_to_cad($fyCalc['annual_total'], $li['currency']);
@@ -148,6 +150,7 @@ $currFy = budsheets_get_fiscal_year();
                                 <tr>
                                     <td class="ps-3 fw-semibold text-dark"><?= e($lob['name']) ?></td>
                                     <td><span class="badge bg-secondary"><?= e($lob['code'] ?: 'N/A') ?></span></td>
+                                    <td><span class="badge bg-primary-subtle text-primary border border-primary-subtle">FY<?= $lobFy ?></span></td>
                                     <td class="text-center fw-bold"><?= count($lobItems) ?></td>
                                     <td class="fw-semibold">$<?= number_format($lobMonthlyBaseCad, 2) ?> CAD</td>
                                     <td class="fw-bold text-primary">$<?= number_format($lobMonthlyTotalCad, 2) ?> CAD</td>

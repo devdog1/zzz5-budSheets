@@ -6,3 +6,4 @@ DROP TABLE IF EXISTS `plug_budsheets_class_lobs`;
 DROP TABLE IF EXISTS `plug_budsheets_classes`;
 DROP TABLE IF EXISTS `plug_budsheets_lob_users`;
 DROP TABLE IF EXISTS `plug_budsheets_lines_of_business`;
+DROP TABLE IF EXISTS `plug_budsheets_fiscal_years`;

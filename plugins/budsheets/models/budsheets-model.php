@@ -39,6 +39,37 @@ function budsheets_ensure_tables_exist($pdb) {
         }
     }
 
+    // Auto-create fiscal_years table if missing
+    try {
+        $fyTable = $pdb->getTableName('fiscal_years');
+        $pdb->query("SELECT 1 FROM {$fyTable} LIMIT 1");
+    } catch (Exception $e) {
+        try {
+            $fyTable = $pdb->getTableName('fiscal_years');
+            $pdb->query("CREATE TABLE IF NOT EXISTS {$fyTable} (
+                year INT PRIMARY KEY,
+                is_hidden TINYINT(1) NOT NULL DEFAULT 0,
+                is_locked TINYINT(1) NOT NULL DEFAULT 0,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;");
+        } catch (Exception $ex) {
+            // Ignore
+        }
+    }
+
+    // Auto-migrate fiscal_year column in lines_of_business table if missing
+    try {
+        $lobTable = $pdb->getTableName('lines_of_business');
+        $pdb->query("SELECT fiscal_year FROM {$lobTable} LIMIT 1");
+    } catch (Exception $e) {
+        try {
+            $lobTable = $pdb->getTableName('lines_of_business');
+            $pdb->query("ALTER TABLE {$lobTable} ADD COLUMN fiscal_year INT DEFAULT NULL");
+        } catch (Exception $ex) {
+            // Ignore
+        }
+    }
+
     // Auto-migrate system_directory_link column if missing
     try {
         $itemsTable = $pdb->getTableName('items');
@@ -100,7 +131,10 @@ function budsheets_ensure_tables_exist($pdb) {
             $rows = $pdb->query("SELECT id, lob_id FROM {$classesTable} WHERE lob_id IS NOT NULL AND lob_id > 0")->fetchAll();
             foreach ($rows as $r) {
                 try {
-                    $pdb->query("INSERT IGNORE INTO {$classLobsTable} (class_id, lob_id) VALUES (?, ?)", [(int)$r['id'], (int)$r['lob_id']]);
+                    $existing = $pdb->query("SELECT class_id FROM {$classLobsTable} WHERE class_id = ? AND lob_id = ?", [(int)$r['id'], (int)$r['lob_id']])->fetch();
+                    if (!$existing) {
+                        $pdb->query("INSERT INTO {$classLobsTable} (class_id, lob_id) VALUES (?, ?)", [(int)$r['id'], (int)$r['lob_id']]);
+                    }
                 } catch (Exception $ex) {}
             }
         } catch (Exception $ex) {
@@ -228,10 +262,91 @@ function budsheets_save_settings($data) {
     return true;
 }
 
+// ==========================================
+// Managed Financial / Fiscal Years Logic
+// ==========================================
+
+function budsheets_get_managed_fiscal_years($includeHidden = false) {
+    $pdb = budsheets_db();
+    if (!$pdb) return [];
+
+    $table = $pdb->getTableName('fiscal_years');
+    $sql = "SELECT * FROM {$table}";
+    if (!$includeHidden) {
+        $sql .= " WHERE is_hidden = 0";
+    }
+    $sql .= " ORDER BY year DESC";
+
+    $rows = $pdb->query($sql)->fetchAll();
+
+    if (empty($rows)) {
+        $currentFy = budsheets_get_fiscal_year();
+        $settings = budsheets_get_settings();
+        $startingFy = (int)($settings['starting_fiscal_year'] ?? $currentFy);
+        $minYr = min($startingFy, $currentFy - 1);
+        $maxYr = max($startingFy + 3, $currentFy + 3);
+
+        for ($y = $minYr; $y <= $maxYr; $y++) {
+            try {
+                $existing = $pdb->query("SELECT year FROM {$table} WHERE year = ?", [$y])->fetch();
+                if (!$existing) {
+                    $pdb->query("INSERT INTO {$table} (year, is_hidden, is_locked) VALUES (?, 0, 0)", [$y]);
+                }
+            } catch (Exception $e) {}
+        }
+        $rows = $pdb->query($sql)->fetchAll();
+    }
+
+    return $rows;
+}
+
+function budsheets_add_fiscal_year($year) {
+    $pdb = budsheets_db();
+    if (!$pdb) return false;
+
+    $table = $pdb->getTableName('fiscal_years');
+    $y = (int)$year;
+    if ($y < 2000 || $y > 2100) return false;
+
+    $existing = $pdb->query("SELECT year FROM {$table} WHERE year = ?", [$y])->fetch();
+    if ($existing) {
+        $pdb->query("UPDATE {$table} SET is_hidden = 0 WHERE year = ?", [$y]);
+    } else {
+        $pdb->query("INSERT INTO {$table} (year, is_hidden, is_locked) VALUES (?, 0, 0)", [$y]);
+    }
+    return true;
+}
+
+function budsheets_hide_fiscal_year($year, $hide = true) {
+    $pdb = budsheets_db();
+    if (!$pdb) return false;
+
+    $table = $pdb->getTableName('fiscal_years');
+    $pdb->query("UPDATE {$table} SET is_hidden = ? WHERE year = ?", [$hide ? 1 : 0, (int)$year]);
+    return true;
+}
+
+function budsheets_remove_fiscal_year($year) {
+    $pdb = budsheets_db();
+    if (!$pdb) return false;
+
+    $table = $pdb->getTableName('fiscal_years');
+    return $pdb->query("DELETE FROM {$table} WHERE year = ?", [(int)$year]);
+}
+
 /**
  * Get list of locked fiscal years
  */
 function budsheets_get_locked_fiscal_years() {
+    $pdb = budsheets_db();
+    if ($pdb) {
+        $table = $pdb->getTableName('fiscal_years');
+        $rows = $pdb->query("SELECT year FROM {$table} WHERE is_locked = 1")->fetchAll();
+        if (!empty($rows)) {
+            return array_map('intval', array_column($rows, 'year'));
+        }
+    }
+
     if (function_exists('get_plugin_setting')) {
         $val = get_plugin_setting('budsheets', 'locked_fiscal_years', '[]');
         $arr = json_decode($val, true);
@@ -252,6 +367,14 @@ function budsheets_is_fiscal_year_locked($fiscal_year) {
  * Set lock status for a fiscal year
  */
 function budsheets_set_fiscal_year_lock($fiscal_year, $isLocked) {
+    $pdb = budsheets_db();
+    if ($pdb) {
+        $table = $pdb->getTableName('fiscal_years');
+        $fy = (int)$fiscal_year;
+        budsheets_add_fiscal_year($fy);
+        $pdb->query("UPDATE {$table} SET is_locked = ? WHERE year = ?", [$isLocked ? 1 : 0, $fy]);
+    }
+
     if (!function_exists('set_plugin_setting')) return false;
 
     $fy = (int)$fiscal_year;
@@ -438,7 +561,7 @@ function budsheets_save_item_monthly_schedule($item_id, $fiscal_year, $monthly_a
 /**
  * Calculates item cost and tax for a specific fiscal year.
  * Rule: Financial info is NOT auto-filled / carried over from year to year unless
- * an explicit schedule exists for that fiscal year OR if it matches the item's initial created fiscal year (or active contract range).
+ * an explicit schedule exists for that fiscal year OR if it matches the item's budget fiscal year.
  */
 function budsheets_calculate_item_fy_cost($item, $fiscal_year = null) {
     if (!$fiscal_year) {
@@ -456,9 +579,9 @@ function budsheets_calculate_item_fy_cost($item, $fiscal_year = null) {
         return $calc;
     }
 
-    $createdFy = budsheets_get_fiscal_year($item['contract_start_date'] ?: ($item['created_at'] ?? null));
+    $itemFy = !empty($item['lob_fiscal_year']) ? (int)$item['lob_fiscal_year'] : budsheets_get_fiscal_year($item['contract_start_date'] ?: ($item['created_at'] ?? null));
 
-    $isInitialOrContractYear = ($fiscal_year == $createdFy);
+    $isInitialOrContractYear = ($fiscal_year == $itemFy);
 
     if (!empty($item['contract_start_date']) && !empty($item['contract_end_date'])) {
         $startFy = budsheets_get_fiscal_year($item['contract_start_date']);
@@ -528,14 +651,20 @@ function budsheets_get_lob($id) {
     return $pdb->query("SELECT * FROM {$table} WHERE id = ?", [(int)$id])->fetch();
 }
 
-function budsheets_add_lob($name, $code = '', $description = '', $user_ids = []) {
+function budsheets_add_lob($name, $code = '', $description = '', $user_ids = [], $fiscal_year = null) {
     $pdb = budsheets_db();
     if (!$pdb) return false;
+
+    if (!$fiscal_year) {
+        $fiscal_year = budsheets_get_fiscal_year();
+    }
+
     $table = $pdb->getTableName('lines_of_business');
-    $pdb->query("INSERT INTO {$table} (name, code, description) VALUES (?, ?, ?)", [
+    $pdb->query("INSERT INTO {$table} (name, code, description, fiscal_year) VALUES (?, ?, ?, ?)", [
         trim($name),
         trim($code),
-        trim($description)
+        trim($description),
+        (int)$fiscal_year
     ]);
     $lob_id = budsheets_last_insert_id($pdb);
 
@@ -545,14 +674,21 @@ function budsheets_add_lob($name, $code = '', $description = '', $user_ids = [])
     return $lob_id;
 }
 
-function budsheets_update_lob($id, $name, $code = '', $description = '', $user_ids = null) {
+function budsheets_update_lob($id, $name, $code = '', $description = '', $user_ids = null, $fiscal_year = null) {
     $pdb = budsheets_db();
     if (!$pdb) return false;
+
+    if (!$fiscal_year) {
+        $existing = budsheets_get_lob($id);
+        $fiscal_year = $existing['fiscal_year'] ?? budsheets_get_fiscal_year();
+    }
+
     $table = $pdb->getTableName('lines_of_business');
-    $res = $pdb->query("UPDATE {$table} SET name = ?, code = ?, description = ? WHERE id = ?", [
+    $res = $pdb->query("UPDATE {$table} SET name = ?, code = ?, description = ?, fiscal_year = ? WHERE id = ?", [
         trim($name),
         trim($code),
         trim($description),
+        (int)$fiscal_year,
         (int)$id
     ]);
 
@@ -567,6 +703,74 @@ function budsheets_delete_lob($id) {
     if (!$pdb) return false;
     $table = $pdb->getTableName('lines_of_business');
     return $pdb->query("DELETE FROM {$table} WHERE id = ?", [(int)$id]);
+}
+
+/**
+ * Clone a budget (Line of Business) to a target Financial Year.
+ * Clone types:
+ * - 'full': copies items WITH recurring amounts and custom monthly schedule costs.
+ * - 'soft': copies items WITHOUT financials (sets monthly_cost = 0.00 and no schedule).
+ */
+function budsheets_clone_budget($source_lob_id, $target_name, $target_code, $target_fiscal_year, $clone_type = 'full') {
+    $sourceLob = budsheets_get_lob($source_lob_id);
+    if (!$sourceLob) return false;
+
+    $assignedUsers = budsheets_get_lob_users($source_lob_id);
+
+    // 1. Create new target Budget assigned to target_fiscal_year
+    $newLobId = budsheets_add_lob($target_name, $target_code, $sourceLob['description'], $assignedUsers, $target_fiscal_year);
+    if (!$newLobId) return false;
+
+    // 2. Assign same expense classes to new budget
+    $sourceClasses = budsheets_get_classes_by_lob($source_lob_id);
+    $classLobsTable = budsheets_db()->getTableName('class_lobs');
+    foreach ($sourceClasses as $sc) {
+        try {
+            $existing = budsheets_db()->query("SELECT class_id FROM {$classLobsTable} WHERE class_id = ? AND lob_id = ?", [(int)$sc['id'], (int)$newLobId])->fetch();
+            if (!$existing) {
+                budsheets_db()->query("INSERT INTO {$classLobsTable} (class_id, lob_id) VALUES (?, ?)", [(int)$sc['id'], (int)$newLobId]);
+            }
+        } catch (Exception $ex) {}
+    }
+
+    // 3. Copy items
+    $sourceItems = budsheets_get_items($source_lob_id);
+    $sourceFy = !empty($sourceLob['fiscal_year']) ? (int)$sourceLob['fiscal_year'] : budsheets_get_fiscal_year();
+
+    foreach ($sourceItems as $item) {
+        $cost = ($clone_type === 'full') ? (float)$item['monthly_cost'] : 0.00;
+
+        $newItemData = [
+            'lob_id'                => $newLobId,
+            'vendor'                => $item['vendor'],
+            'product'               => $item['product'],
+            'currency'              => $item['currency'],
+            'monthly_cost'          => $cost,
+            'billing_frequency'     => $item['billing_frequency'],
+            'invoice_month'         => $item['invoice_month'],
+            'tax_type'              => $item['tax_type'],
+            'class'                 => $item['class'],
+            'description'           => $item['description'],
+            'invoice_type'          => $item['invoice_type'],
+            'invoice_date'          => $item['invoice_date'],
+            'contract_start_date'   => $item['contract_start_date'],
+            'contract_end_date'     => $item['contract_end_date'],
+            'long_description'      => $item['long_description'],
+            'system_directory_link' => $item['system_directory_link']
+        ];
+
+        $newItemId = budsheets_save_item($newItemData);
+
+        if ($newItemId && $clone_type === 'full') {
+            // Copy monthly schedule from source budget FY to target FY if present
+            $sourceSched = budsheets_get_item_monthly_schedule($item['id'], $sourceFy);
+            if (!empty($sourceSched)) {
+                budsheets_save_item_monthly_schedule($newItemId, $target_fiscal_year, $sourceSched);
+            }
+        }
+    }
+
+    return $newLobId;
 }
 
 // ==========================================
@@ -705,7 +909,10 @@ function budsheets_add_class($lob_ids, $name, $description = '') {
         foreach ($lobArray as $lid) {
             if ($lid > 0) {
                 try {
-                    $pdb->query("INSERT IGNORE INTO {$classLobsTable} (class_id, lob_id) VALUES (?, ?)", [(int)$class_id, (int)$lid]);
+                    $existing = $pdb->query("SELECT class_id FROM {$classLobsTable} WHERE class_id = ? AND lob_id = ?", [(int)$class_id, (int)$lid])->fetch();
+                    if (!$existing) {
+                        $pdb->query("INSERT INTO {$classLobsTable} (class_id, lob_id) VALUES (?, ?)", [(int)$class_id, (int)$lid]);
+                    }
                 } catch (Exception $ex) {}
             }
         }
@@ -736,7 +943,10 @@ function budsheets_update_class($id, $lob_ids, $name, $description = '') {
         foreach ($lobArray as $lid) {
             if ($lid > 0) {
                 try {
-                    $pdb->query("INSERT IGNORE INTO {$classLobsTable} (class_id, lob_id) VALUES (?, ?)", [(int)$id, (int)$lid]);
+                    $existing = $pdb->query("SELECT class_id FROM {$classLobsTable} WHERE class_id = ? AND lob_id = ?", [(int)$id, (int)$lid])->fetch();
+                    if (!$existing) {
+                        $pdb->query("INSERT INTO {$classLobsTable} (class_id, lob_id) VALUES (?, ?)", [(int)$id, (int)$lid]);
+                    }
                 } catch (Exception $ex) {}
             }
         }
@@ -762,7 +972,7 @@ function budsheets_get_items($lob_id = null) {
     $lobTable = $pdb->getTableName('lines_of_business');
     $userLobTable = $pdb->getTableName('lob_users');
 
-    $sql = "SELECT i.*, l.name as lob_name, l.code as lob_code
+    $sql = "SELECT i.*, l.name as lob_name, l.code as lob_code, l.fiscal_year as lob_fiscal_year
             FROM {$itemsTable} i
             LEFT JOIN {$lobTable} l ON i.lob_id = l.id";
     $params = [];
@@ -794,7 +1004,7 @@ function budsheets_get_item($id) {
     $lobTable = $pdb->getTableName('lines_of_business');
     $userLobTable = $pdb->getTableName('lob_users');
 
-    $sql = "SELECT i.*, l.name as lob_name, l.code as lob_code
+    $sql = "SELECT i.*, l.name as lob_name, l.code as lob_code, l.fiscal_year as lob_fiscal_year
             FROM {$itemsTable} i
             LEFT JOIN {$lobTable} l ON i.lob_id = l.id
             WHERE i.id = ?";
@@ -823,7 +1033,7 @@ function budsheets_save_item($data, $item_id = null) {
         if (!$existing) {
             die('Access Denied: Target item not found or access restricted.');
         }
-        $itemFy = budsheets_get_fiscal_year($existing['contract_start_date'] ?: ($existing['created_at'] ?? null));
+        $itemFy = !empty($existing['lob_fiscal_year']) ? (int)$existing['lob_fiscal_year'] : budsheets_get_fiscal_year($existing['contract_start_date'] ?: ($existing['created_at'] ?? null));
         if (budsheets_is_fiscal_year_locked($itemFy)) {
             die("Access Denied: Fiscal Year FY{$itemFy} is locked. Basic item details cannot be modified.");
         }
@@ -879,7 +1089,7 @@ function budsheets_delete_item($id) {
         die('Access Denied: Budget item not found or access restricted.');
     }
 
-    $itemFy = budsheets_get_fiscal_year($item['contract_start_date'] ?: ($item['created_at'] ?? null));
+    $itemFy = !empty($item['lob_fiscal_year']) ? (int)$item['lob_fiscal_year'] : budsheets_get_fiscal_year($item['contract_start_date'] ?: ($item['created_at'] ?? null));
     if (budsheets_is_fiscal_year_locked($itemFy)) {
         die("Access Denied: Fiscal Year FY{$itemFy} is locked. Budget item cannot be deleted.");
     }
@@ -1136,7 +1346,8 @@ function budsheets_get_dashboard_summary() {
     $annualCostCad = 0.0;
 
     foreach ($items as $item) {
-        $fyCalc = budsheets_calculate_item_fy_cost($item, $fy);
+        $itemFy = !empty($item['lob_fiscal_year']) ? (int)$item['lob_fiscal_year'] : $fy;
+        $fyCalc = budsheets_calculate_item_fy_cost($item, $itemFy);
         $monthlyCostCad += budsheets_convert_to_cad($fyCalc['monthly_total'], $item['currency']);
         $annualCostCad += budsheets_convert_to_cad($fyCalc['annual_total'], $item['currency']);
     }

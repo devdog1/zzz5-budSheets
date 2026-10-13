@@ -29,6 +29,27 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         } else {
             $error = 'Failed to update settings.';
         }
+    } elseif ($action === 'add_fy') {
+        $fyVal = (int)($_POST['new_fy'] ?? 0);
+        if ($fyVal >= 2000 && $fyVal <= 2100) {
+            budsheets_add_fiscal_year($fyVal);
+            $message = "Financial Year FY{$fyVal} added successfully.";
+        } else {
+            $error = "Invalid Financial Year number.";
+        }
+    } elseif ($action === 'toggle_fy_hide') {
+        $fyVal = (int)($_POST['target_fy'] ?? 0);
+        $hideStatus = !empty($_POST['hide_status']);
+        if ($fyVal) {
+            budsheets_hide_fiscal_year($fyVal, $hideStatus);
+            $message = $hideStatus ? "Financial Year FY{$fyVal} is now hidden." : "Financial Year FY{$fyVal} is now visible.";
+        }
+    } elseif ($action === 'remove_fy') {
+        $fyVal = (int)($_POST['target_fy'] ?? 0);
+        if ($fyVal) {
+            budsheets_remove_fiscal_year($fyVal);
+            $message = "Financial Year FY{$fyVal} removed.";
+        }
     } elseif ($action === 'toggle_year_lock') {
         $fyTarget = (int)($_POST['target_fy'] ?? 0);
         $lockStatus = !empty($_POST['lock_status']);
@@ -87,15 +108,14 @@ $monthsList = [
 ];
 
 $currentFy = budsheets_get_fiscal_year();
-$lockedFyList = budsheets_get_locked_fiscal_years();
-$startingFy = (int)($settings['starting_fiscal_year'] ?? $currentFy);
+$managedFyList = budsheets_get_managed_fiscal_years(true);
 ?>
 
 <div class="container-fluid py-4">
     <div class="d-flex justify-content-between align-items-center mb-4">
         <div>
             <h2 class="fw-bold text-dark mb-1"><i class="fa-solid fa-gear me-2 text-primary"></i>Plugin Settings & Configurations</h2>
-            <p class="text-muted small mb-0">Manage Fiscal Year boundaries, lock/unlock budget years, tax rates, currency exchange rates to CAD, and Budget expense classes.</p>
+            <p class="text-muted small mb-0">Manage Financial Years, PST/GST tax rates, currency exchange rates to CAD, and Budget expense classes.</p>
         </div>
     </div>
 
@@ -200,55 +220,90 @@ $startingFy = (int)($settings['starting_fiscal_year'] ?? $currentFy);
             </div>
         </div>
 
-        <!-- Budget Year Locking & Expense Class Management Side Column -->
+        <!-- Right Side: Managed Financial Years & Expense Classes -->
         <div class="col-lg-6">
-            <!-- Budget Fiscal Year Lock Management Box -->
+            <!-- Financial Years Management Box -->
             <div class="card border-0 shadow-sm mb-4">
-                <div class="card-header bg-white py-3">
-                    <h5 class="fw-bold mb-0 text-dark"><i class="fa-solid fa-lock me-2 text-danger"></i>Budget Year Lock Management</h5>
+                <div class="card-header bg-white py-3 d-flex justify-content-between align-items-center">
+                    <h5 class="fw-bold mb-0 text-dark"><i class="fa-solid fa-calendar-check me-2 text-primary"></i>Financial Years Management</h5>
+                    <button type="button" class="btn btn-sm btn-primary" data-bs-toggle="modal" data-bs-target="#addFyModal">
+                        <i class="fa-solid fa-plus me-1"></i> Add Year
+                    </button>
                 </div>
                 <div class="card-body p-0">
-                    <div class="p-3 bg-light border-bottom small text-muted">
-                        <i class="fa-solid fa-shield-halved me-1 text-primary"></i> Locking a budget fiscal year blocks modifications to basic item details and monthly budget schedules, while still permitting invoice recordings and document uploads.
-                    </div>
                     <div class="table-responsive">
                         <table class="table table-hover align-middle mb-0">
                             <thead class="table-light">
                                 <tr>
-                                    <th class="ps-3">Fiscal Year</th>
-                                    <th>Status</th>
-                                    <th class="text-end pe-3">Action</th>
+                                    <th class="ps-3">Financial Year</th>
+                                    <th>Visibility</th>
+                                    <th>Lock Status</th>
+                                    <th class="text-end pe-3">Actions</th>
                                 </tr>
                             </thead>
                             <tbody>
-                                <?php
-                                $fyStartYearRange = min($startingFy, $currentFy - 2);
-                                $fyEndYearRange = max($startingFy + 5, $currentFy + 3);
-                                for ($y = $fyStartYearRange; $y <= $fyEndYearRange; $y++):
-                                    $isLocked = budsheets_is_fiscal_year_locked($y);
-                                ?>
+                                <?php if (empty($managedFyList)): ?>
                                     <tr>
-                                        <td class="ps-3 fw-bold text-dark">FY<?= $y ?></td>
-                                        <td>
-                                            <?php if ($isLocked): ?>
-                                                <span class="badge bg-danger"><i class="fa-solid fa-lock me-1"></i>Locked</span>
-                                            <?php else: ?>
-                                                <span class="badge bg-success"><i class="fa-solid fa-lock-open me-1"></i>Active / Editable</span>
-                                            <?php endif; ?>
-                                        </td>
-                                        <td class="text-end pe-3">
-                                            <form method="POST" class="d-inline">
-                                                <?php if (function_exists('csrf_field')) echo csrf_field(); ?>
-                                                <input type="hidden" name="action" value="toggle_year_lock">
-                                                <input type="hidden" name="target_fy" value="<?= $y ?>">
-                                                <input type="hidden" name="lock_status" value="<?= $isLocked ? '0' : '1' ?>">
-                                                <button type="submit" class="btn btn-sm <?= $isLocked ? 'btn-outline-success' : 'btn-outline-danger' ?>">
-                                                    <i class="fa-solid <?= $isLocked ? 'fa-lock-open me-1' : 'fa-lock me-1' ?>"></i><?= $isLocked ? 'Unlock FY' . $y : 'Lock FY' . $y ?>
-                                                </button>
-                                            </form>
-                                        </td>
+                                        <td colspan="4" class="text-center py-3 text-muted">No financial years defined.</td>
                                     </tr>
-                                <?php endfor; ?>
+                                <?php else: ?>
+                                    <?php foreach ($managedFyList as $fyRow):
+                                        $y = (int)$fyRow['year'];
+                                        $isHidden = !empty($fyRow['is_hidden']);
+                                        $isLocked = !empty($fyRow['is_locked']);
+                                    ?>
+                                        <tr>
+                                            <td class="ps-3 fw-bold text-dark">FY<?= $y ?></td>
+                                            <td>
+                                                <?php if ($isHidden): ?>
+                                                    <span class="badge bg-secondary"><i class="fa-solid fa-eye-slash me-1"></i>Hidden</span>
+                                                <?php else: ?>
+                                                    <span class="badge bg-info"><i class="fa-solid fa-eye me-1"></i>Active / Visible</span>
+                                                <?php endif; ?>
+                                            </td>
+                                            <td>
+                                                <?php if ($isLocked): ?>
+                                                    <span class="badge bg-danger"><i class="fa-solid fa-lock me-1"></i>Locked</span>
+                                                <?php else: ?>
+                                                    <span class="badge bg-success"><i class="fa-solid fa-lock-open me-1"></i>Editable</span>
+                                                <?php endif; ?>
+                                            </td>
+                                            <td class="text-end pe-3">
+                                                <!-- Toggle Hide/Unhide -->
+                                                <form method="POST" class="d-inline me-1">
+                                                    <?php if (function_exists('csrf_field')) echo csrf_field(); ?>
+                                                    <input type="hidden" name="action" value="toggle_fy_hide">
+                                                    <input type="hidden" name="target_fy" value="<?= $y ?>">
+                                                    <input type="hidden" name="hide_status" value="<?= $isHidden ? '0' : '1' ?>">
+                                                    <button type="submit" class="btn btn-sm <?= $isHidden ? 'btn-outline-info' : 'btn-outline-secondary' ?>" title="<?= $isHidden ? 'Unhide' : 'Hide' ?>">
+                                                        <i class="fa-solid <?= $isHidden ? 'fa-eye' : 'fa-eye-slash' ?>"></i>
+                                                    </button>
+                                                </form>
+
+                                                <!-- Toggle Lock/Unlock -->
+                                                <form method="POST" class="d-inline me-1">
+                                                    <?php if (function_exists('csrf_field')) echo csrf_field(); ?>
+                                                    <input type="hidden" name="action" value="toggle_year_lock">
+                                                    <input type="hidden" name="target_fy" value="<?= $y ?>">
+                                                    <input type="hidden" name="lock_status" value="<?= $isLocked ? '0' : '1' ?>">
+                                                    <button type="submit" class="btn btn-sm <?= $isLocked ? 'btn-outline-success' : 'btn-outline-warning' ?>" title="<?= $isLocked ? 'Unlock FY' . $y : 'Lock FY' . $y ?>">
+                                                        <i class="fa-solid <?= $isLocked ? 'fa-lock-open' : 'fa-lock' ?>"></i>
+                                                    </button>
+                                                </form>
+
+                                                <!-- Remove FY -->
+                                                <form method="POST" class="d-inline" onsubmit="return confirm('Remove Financial Year FY<?= $y ?>?');">
+                                                    <?php if (function_exists('csrf_field')) echo csrf_field(); ?>
+                                                    <input type="hidden" name="action" value="remove_fy">
+                                                    <input type="hidden" name="target_fy" value="<?= $y ?>">
+                                                    <button type="submit" class="btn btn-sm btn-outline-danger" title="Remove Year">
+                                                        <i class="fa-solid fa-trash"></i>
+                                                    </button>
+                                                </form>
+                                            </td>
+                                        </tr>
+                                    <?php endforeach; ?>
+                                <?php endif; ?>
                             </tbody>
                         </table>
                     </div>
@@ -349,6 +404,32 @@ $startingFy = (int)($settings['starting_fiscal_year'] ?? $currentFy);
                     </div>
                 </div>
             </div>
+        </div>
+    </div>
+</div>
+
+<!-- Add Financial Year Modal -->
+<div class="modal fade" id="addFyModal" tabindex="-1">
+    <div class="modal-dialog modal-sm">
+        <div class="modal-content">
+            <form method="POST">
+                <?php if (function_exists('csrf_field')) echo csrf_field(); ?>
+                <input type="hidden" name="action" value="add_fy">
+                <div class="modal-header">
+                    <h5 class="modal-title fw-bold"><i class="fa-solid fa-calendar-plus me-2"></i>Add Financial Year</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label class="form-label fw-semibold">Year Number <span class="text-danger">*</span></label>
+                        <input type="number" min="2000" max="2100" name="new_fy" class="form-control" value="<?= (int)date('Y') + 1 ?>" required>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-light" data-bs-dismiss="modal">Cancel</button>
+                    <button type="submit" class="btn btn-primary">Add Year</button>
+                </div>
+            </form>
         </div>
     </div>
 </div>
