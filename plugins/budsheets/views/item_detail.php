@@ -22,7 +22,7 @@ $message = '';
 $error = '';
 
 $currentFy = budsheets_get_fiscal_year();
-$selectedFy = isset($_GET['fy']) && $_GET['fy'] !== '' ? (int)$_GET['fy'] : (!empty($item['lob_fiscal_year']) ? (int)$item['lob_fiscal_year'] : $currentFy);
+$selectedFy = !empty($item['lob_fiscal_year']) ? (int)$item['lob_fiscal_year'] : $currentFy;
 $isFyLocked = budsheets_is_fiscal_year_locked($selectedFy);
 
 $itemStartFy = !empty($item['lob_fiscal_year']) ? (int)$item['lob_fiscal_year'] : budsheets_get_fiscal_year($item['contract_start_date'] ?: ($item['created_at'] ?? null));
@@ -196,18 +196,8 @@ $currentUserId = $_SESSION['user_id'] ?? 0;
         <!-- Item Overview Details -->
         <div class="col-lg-8">
             <div class="card border-0 shadow-sm h-100">
-                <div class="card-header bg-white py-3 d-flex justify-content-between align-items-center">
+                <div class="card-header bg-white py-3">
                     <h5 class="fw-bold mb-0 text-dark"><i class="fa-solid fa-circle-info me-2 text-primary"></i>Item Specifications & Cost Breakdown (CAD)</h5>
-                    <div class="d-flex align-items-center">
-                        <label class="me-2 small fw-semibold mb-0">Fiscal Year:</label>
-                        <select class="form-select form-select-sm" onchange="location.href='<?= url_for('budsheets_item_detail') ?>&id=<?= $itemId ?>&fy=' + this.value;">
-                            <?php for ($y = $currentFy - 3; $y <= $currentFy + 3; $y++): ?>
-                                <option value="<?= $y ?>" <?= $y === $selectedFy ? 'selected' : '' ?>>
-                                    FY<?= $y ?><?= budsheets_is_fiscal_year_locked($y) ? ' (Locked)' : '' ?>
-                                </option>
-                            <?php endfor; ?>
-                        </select>
-                    </div>
                 </div>
                 <div class="card-body">
                     <div class="row g-3">

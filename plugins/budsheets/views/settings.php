@@ -142,11 +142,11 @@ $managedFyList = budsheets_get_managed_fiscal_years(true);
     <?php endif; ?>
 
     <div class="row g-4 mb-4">
-        <!-- Fiscal Year, Tax Rates & Currency Conversion Box -->
+        <!-- Fiscal Year Definition Box -->
         <div class="col-lg-6">
             <div class="card border-0 shadow-sm h-100">
                 <div class="card-header bg-white py-3">
-                    <h5 class="fw-bold mb-0 text-dark"><i class="fa-solid fa-sliders me-2 text-primary"></i>Global Fiscal Year, Default Taxes & FX Rates</h5>
+                    <h5 class="fw-bold mb-0 text-dark"><i class="fa-solid fa-sliders me-2 text-primary"></i>Global Fiscal Year Configuration</h5>
                 </div>
                 <div class="card-body">
                     <form method="POST">
@@ -176,48 +176,9 @@ $managedFyList = budsheets_get_managed_fiscal_years(true);
                             <div class="col-12">
                                 <div class="p-2 bg-light rounded border text-muted small">
                                     <i class="fa-solid fa-circle-info me-1 text-info"></i> Current calculated active Fiscal Year: <strong>FY<?= $currentFy ?></strong>
-                                    <br><span class="text-secondary">(Note: Fiscal Year is named after the calendar year number that Jan 1st falls into)</span>
+                                    <br><span class="text-secondary">(Note: Fiscal Year is named after the calendar year number that Jan 1st falls into. Tax and exchange rates are configured per Financial Year in the table on the right.)</span>
                                 </div>
                             </div>
-                        </div>
-
-                        <h6 class="fw-bold text-secondary mb-3"><i class="fa-solid fa-receipt me-1"></i>Default Tax Rates (%)</h6>
-                        <div class="row g-3 mb-4">
-                            <div class="col-6">
-                                <label class="form-label fw-semibold">GST Rate (%)</label>
-                                <div class="input-group">
-                                    <input type="number" step="0.01" name="gst_rate" class="form-control" value="<?= e($settings['gst_rate']) ?>" required>
-                                    <span class="input-group-text">%</span>
-                                </div>
-                            </div>
-                            <div class="col-6">
-                                <label class="form-label fw-semibold">PST Rate (%)</label>
-                                <div class="input-group">
-                                    <input type="number" step="0.01" name="pst_rate" class="form-control" value="<?= e($settings['pst_rate']) ?>" required>
-                                    <span class="input-group-text">%</span>
-                                </div>
-                            </div>
-                        </div>
-
-                        <h6 class="fw-bold text-secondary mb-3"><i class="fa-solid fa-money-bill-transfer me-1"></i>Default Exchange Rates (1 Foreign Unit = X CAD)</h6>
-                        <div class="row g-3 mb-3">
-                            <div class="col-6">
-                                <label class="form-label fw-semibold">1 USD in CAD</label>
-                                <input type="number" step="0.0001" name="rate_USD" class="form-control" value="<?= e($settings['rate_USD']) ?>" required>
-                            </div>
-                            <div class="col-6">
-                                <label class="form-label fw-semibold">1 EUR in CAD</label>
-                                <input type="number" step="0.0001" name="rate_EUR" class="form-control" value="<?= e($settings['rate_EUR']) ?>" required>
-                            </div>
-                            <div class="col-6">
-                                <label class="form-label fw-semibold">1 GBP in CAD</label>
-                                <input type="number" step="0.0001" name="rate_GBP" class="form-control" value="<?= e($settings['rate_GBP']) ?>" required>
-                            </div>
-                            <div class="col-6">
-                                <label class="form-label fw-semibold">1 AUD in CAD</label>
-                                <input type="number" step="0.0001" name="rate_AUD" class="form-control" value="<?= e($settings['rate_AUD']) ?>" required>
-                            </div>
-                            <input type="hidden" name="rate_CAD" value="1.0">
                         </div>
 
                         <div class="text-end mt-4">
