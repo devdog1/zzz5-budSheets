@@ -25,10 +25,10 @@ $currentFy = budsheets_get_fiscal_year();
 $selectedFy = isset($_GET['fy']) ? (int)$_GET['fy'] : $currentFy;
 $isFyLocked = budsheets_is_fiscal_year_locked($selectedFy);
 
-$itemStartFy = budsheets_get_fiscal_year($item['contract_start_date'] ?: ($item['created_at'] ?? null));
+$itemStartFy = !empty($item['lob_fiscal_year']) ? (int)$item['lob_fiscal_year'] : budsheets_get_fiscal_year($item['contract_start_date'] ?: ($item['created_at'] ?? null));
 $isItemFyLocked = budsheets_is_fiscal_year_locked($itemStartFy);
 
-// Handle Actions (Invoices, Contract Deletion, Monthly Budget Schedule)
+// Handle Actions (Invoices, Contract Deletion, Monthly Budget Schedule, Comments)
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if (function_exists('validate_csrf')) {
         validate_csrf();
@@ -99,19 +99,35 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             budsheets_save_contract_files($itemId, $_FILES['contract_files']);
             $message = 'Contract file(s) uploaded successfully.';
         }
+    } elseif ($action === 'add_comment') {
+        $commentText = trim($_POST['comment_text'] ?? '');
+        if (!empty($commentText)) {
+            budsheets_add_comment('item', $itemId, $commentText);
+            $message = 'Comment added successfully.';
+        } else {
+            $error = 'Comment text cannot be empty.';
+        }
+    } elseif ($action === 'delete_comment') {
+        $commentId = (int)($_POST['comment_id'] ?? 0);
+        if ($commentId) {
+            budsheets_delete_comment($commentId);
+            $message = 'Comment removed.';
+        }
     }
 }
 
 $contracts = budsheets_get_contract_files($itemId);
 $invoices = budsheets_get_invoices($itemId);
+$comments = budsheets_get_comments('item', $itemId);
 
 $fyCalc = budsheets_calculate_item_fy_cost($item, $selectedFy);
-$monthlyCad = budsheets_convert_to_cad($fyCalc['monthly_total'], $item['currency']);
-$annualCad = budsheets_convert_to_cad($fyCalc['annual_total'], $item['currency']);
+$monthlyCad = budsheets_convert_to_cad($fyCalc['monthly_total'], $item['currency'], $selectedFy);
+$annualCad = budsheets_convert_to_cad($fyCalc['annual_total'], $item['currency'], $selectedFy);
 
 $totalInvoicedCad = 0.0;
 foreach ($invoices as $inv) {
-    $totalInvoicedCad += budsheets_convert_to_cad($inv['amount_paid'], $inv['currency']);
+    $invFy = (int)($inv['period_year'] ?? date('Y'));
+    $totalInvoicedCad += budsheets_convert_to_cad($inv['amount_paid'], $inv['currency'], $invFy);
 }
 
 $existingSchedule = budsheets_get_item_monthly_schedule($itemId, $selectedFy);
@@ -128,6 +144,8 @@ $fullMonthsNames = [
     5 => 'May', 6 => 'June', 7 => 'July', 8 => 'August',
     9 => 'September', 10 => 'October', 11 => 'November', 12 => 'December'
 ];
+
+$currentUserId = $_SESSION['user_id'] ?? 0;
 ?>
 
 <div class="container-fluid py-4">
@@ -361,8 +379,8 @@ $fullMonthsNames = [
                 $defaultMonthlyBase = ($item['billing_frequency'] === 'yearly') ? ((float)$item['monthly_cost'] / 12.0) : (float)$item['monthly_cost'];
                 foreach ($fyMonthsOrder as $mNum):
                     $mAmount = isset($existingSchedule[$mNum]) ? $existingSchedule[$mNum] : ($fyCalc['has_custom_schedule'] ? 0.0 : $fyCalc['monthly_base']);
-                    $mTax = budsheets_calculate_tax($mAmount, $item['tax_type'], 'monthly');
-                    $mCadTotal = budsheets_convert_to_cad($mTax['total'], $item['currency']);
+                    $mTax = budsheets_calculate_tax($mAmount, $item['tax_type'], 'monthly', $selectedFy);
+                    $mCadTotal = budsheets_convert_to_cad($mTax['total'], $item['currency'], $selectedFy);
                 ?>
                     <div class="col-6 col-sm-4 col-md-2 mb-2">
                         <div class="p-2 border rounded bg-light">
@@ -378,7 +396,7 @@ $fullMonthsNames = [
     </div>
 
     <!-- Invoices Section (Allowed on Locked Fiscal Years) -->
-    <div class="card border-0 shadow-sm">
+    <div class="card border-0 shadow-sm mb-4">
         <div class="card-header bg-white py-3 d-flex justify-content-between align-items-center">
             <div>
                 <h5 class="fw-bold mb-0 text-dark"><i class="fa-solid fa-receipt me-2 text-primary"></i>Invoices Paid Against Item</h5>
@@ -412,7 +430,8 @@ $fullMonthsNames = [
                             </tr>
                         <?php else: ?>
                             <?php foreach ($invoices as $inv):
-                                $invCad = budsheets_convert_to_cad($inv['amount_paid'], $inv['currency']);
+                                $invFy = (int)($inv['period_year'] ?? date('Y'));
+                                $invCad = budsheets_convert_to_cad($inv['amount_paid'], $inv['currency'], $invFy);
                             ?>
                                 <tr>
                                     <td class="ps-3 fw-bold text-dark"><?= e($inv['invoice_number'] ?: 'N/A') ?></td>
@@ -543,6 +562,55 @@ $fullMonthsNames = [
                     </tbody>
                 </table>
             </div>
+        </div>
+    </div>
+
+    <!-- Item Comments & Discussion Box -->
+    <div class="card border-0 shadow-sm">
+        <div class="card-header bg-white py-3">
+            <h5 class="fw-bold mb-0 text-dark"><i class="fa-solid fa-comments me-2 text-primary"></i>Item Comments & Discussions</h5>
+        </div>
+        <div class="card-body">
+            <?php if (empty($comments)): ?>
+                <div class="text-muted small py-3 text-center">No comments on this budget item yet. Be the first to leave a comment below.</div>
+            <?php else: ?>
+                <div class="list-group list-group-flush mb-4">
+                    <?php foreach ($comments as $c): ?>
+                        <div class="list-group-item px-0 py-3">
+                            <div class="d-flex justify-content-between align-items-center mb-1">
+                                <div>
+                                    <span class="fw-bold text-dark me-2"><i class="fa-solid fa-user-circle me-1 text-secondary"></i><?= e($c['author_name']) ?></span>
+                                    <span class="text-muted small"><?= e($c['created_at']) ?></span>
+                                </div>
+                                <?php if (has_permission('budsheets_admin') || (int)($c['created_by'] ?? 0) === (int)$currentUserId): ?>
+                                    <form method="POST" class="d-inline" onsubmit="return confirm('Delete this comment?');">
+                                        <?php if (function_exists('csrf_field')) echo csrf_field(); ?>
+                                        <input type="hidden" name="action" value="delete_comment">
+                                        <input type="hidden" name="comment_id" value="<?= (int)$c['id'] ?>">
+                                        <button type="submit" class="btn btn-sm btn-link text-danger text-decoration-none p-0" title="Delete Comment">
+                                            <i class="fa-solid fa-trash-can"></i>
+                                        </button>
+                                    </form>
+                                <?php endif; ?>
+                            </div>
+                            <div class="text-secondary small" style="white-space: pre-wrap;"><?= e($c['comment_text']) ?></div>
+                        </div>
+                    <?php endforeach; ?>
+                </div>
+            <?php endif; ?>
+
+            <!-- Post New Comment Form -->
+            <form method="POST" class="mt-3">
+                <?php if (function_exists('csrf_field')) echo csrf_field(); ?>
+                <input type="hidden" name="action" value="add_comment">
+                <div class="mb-3">
+                    <label class="form-label fw-semibold small">Add Comment / Discussion Note</label>
+                    <textarea name="comment_text" class="form-control form-control-sm" rows="3" placeholder="Type your comment, rationale, or internal note here..." required></textarea>
+                </div>
+                <div class="text-end">
+                    <button type="submit" class="btn btn-sm btn-primary"><i class="fa-solid fa-paper-plane me-1"></i> Post Comment</button>
+                </div>
+            </form>
         </div>
     </div>
 </div>

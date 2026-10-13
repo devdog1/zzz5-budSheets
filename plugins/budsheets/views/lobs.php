@@ -16,6 +16,7 @@ $error = '';
 $systemUsers = budsheets_get_all_system_users();
 $managedFys = budsheets_get_managed_fiscal_years();
 $currentFy = budsheets_get_fiscal_year();
+$currentUserId = $_SESSION['user_id'] ?? 0;
 
 // Handle Actions
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
@@ -84,6 +85,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $error = 'Failed to delete Budget.';
             }
         }
+    } elseif ($action === 'add_comment') {
+        $lob_id = (int)($_POST['lob_id'] ?? 0);
+        $commentText = trim($_POST['comment_text'] ?? '');
+        if ($lob_id && !empty($commentText)) {
+            budsheets_add_comment('budget', $lob_id, $commentText);
+            $message = 'Budget comment added successfully.';
+        } else {
+            $error = 'Comment text cannot be empty.';
+        }
+    } elseif ($action === 'delete_comment') {
+        $commentId = (int)($_POST['comment_id'] ?? 0);
+        if ($commentId) {
+            budsheets_delete_comment($commentId);
+            $message = 'Comment removed.';
+        }
     }
 }
 
@@ -94,7 +110,7 @@ $lobs = budsheets_get_lobs();
     <div class="d-flex justify-content-between align-items-center mb-4">
         <div>
             <h2 class="fw-bold text-dark mb-1"><i class="fa-solid fa-sitemap me-2 text-primary"></i>Budgets</h2>
-            <p class="text-muted small mb-0">Manage organizational budgets assigned to single financial years, clone budgets, and configure user access permissions.</p>
+            <p class="text-muted small mb-0">Manage organizational budgets assigned to single financial years, clone budgets, post comments, and configure user access permissions.</p>
         </div>
         <button type="button" class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#addLobModal">
             <i class="fa-solid fa-plus me-1"></i> Add Budget
@@ -139,6 +155,7 @@ $lobs = budsheets_get_lobs();
                             <?php foreach ($lobs as $lob):
                                 $assignedUids = budsheets_get_lob_users($lob['id']);
                                 $lobFy = !empty($lob['fiscal_year']) ? (int)$lob['fiscal_year'] : $currentFy;
+                                $budgetComments = budsheets_get_comments('budget', $lob['id']);
                             ?>
                                 <tr>
                                     <td class="ps-3 fw-bold text-muted">#<?= (int)$lob['id'] ?></td>
@@ -156,6 +173,12 @@ $lobs = budsheets_get_lobs();
                                         <?php endif; ?>
                                     </td>
                                     <td class="text-end pe-3">
+                                        <!-- Comments Modal Trigger -->
+                                        <button type="button" class="btn btn-sm btn-outline-secondary me-1"
+                                                data-bs-toggle="modal"
+                                                data-bs-target="#commentsLobModal<?= (int)$lob['id'] ?>" title="View & Post Comments">
+                                            <i class="fa-solid fa-comments me-1"></i>Comments (<?= count($budgetComments) ?>)
+                                        </button>
                                         <button type="button" class="btn btn-sm btn-outline-info me-1"
                                                 data-bs-toggle="modal"
                                                 data-bs-target="#cloneLobModal<?= (int)$lob['id'] ?>" title="Clone Budget">
@@ -176,6 +199,60 @@ $lobs = budsheets_get_lobs();
                                         </form>
                                     </td>
                                 </tr>
+
+                                <!-- Budget Comments Modal -->
+                                <div class="modal fade" id="commentsLobModal<?= (int)$lob['id'] ?>" tabindex="-1">
+                                    <div class="modal-dialog modal-lg">
+                                        <div class="modal-content">
+                                            <div class="modal-header">
+                                                <h5 class="modal-title fw-bold"><i class="fa-solid fa-comments me-2 text-primary"></i>Comments & Discussions - <?= e($lob['name']) ?> (FY<?= $lobFy ?>)</h5>
+                                                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                                            </div>
+                                            <div class="modal-body">
+                                                <?php if (empty($budgetComments)): ?>
+                                                    <div class="text-muted small py-3 text-center border-bottom mb-3">No comments on this budget yet. Post a comment below.</div>
+                                                <?php else: ?>
+                                                    <div class="list-group list-group-flush border-bottom mb-3" style="max-height: 250px; overflow-y: auto;">
+                                                        <?php foreach ($budgetComments as $bc): ?>
+                                                            <div class="list-group-item px-0 py-2">
+                                                                <div class="d-flex justify-content-between align-items-center mb-1">
+                                                                    <div>
+                                                                        <span class="fw-bold text-dark me-2"><i class="fa-solid fa-user-circle me-1 text-secondary"></i><?= e($bc['author_name']) ?></span>
+                                                                        <span class="text-muted small"><?= e($bc['created_at']) ?></span>
+                                                                    </div>
+                                                                    <?php if (has_permission('budsheets_admin') || (int)($bc['created_by'] ?? 0) === (int)$currentUserId): ?>
+                                                                        <form method="POST" class="d-inline" onsubmit="return confirm('Delete this comment?');">
+                                                                            <?php if (function_exists('csrf_field')) echo csrf_field(); ?>
+                                                                            <input type="hidden" name="action" value="delete_comment">
+                                                                            <input type="hidden" name="comment_id" value="<?= (int)$bc['id'] ?>">
+                                                                            <button type="submit" class="btn btn-sm btn-link text-danger text-decoration-none p-0" title="Delete Comment">
+                                                                                <i class="fa-solid fa-trash-can"></i>
+                                                                            </button>
+                                                                        </form>
+                                                                    <?php endif; ?>
+                                                                </div>
+                                                                <div class="text-secondary small" style="white-space: pre-wrap;"><?= e($bc['comment_text']) ?></div>
+                                                            </div>
+                                                        <?php endforeach; ?>
+                                                    </div>
+                                                <?php endif; ?>
+
+                                                <form method="POST">
+                                                    <?php if (function_exists('csrf_field')) echo csrf_field(); ?>
+                                                    <input type="hidden" name="action" value="add_comment">
+                                                    <input type="hidden" name="lob_id" value="<?= (int)$lob['id'] ?>">
+                                                    <div class="mb-3">
+                                                        <label class="form-label fw-semibold small">Post a Comment for <?= e($lob['name']) ?></label>
+                                                        <textarea name="comment_text" class="form-control form-control-sm" rows="3" placeholder="Type your comment, rationale, or internal note here..." required></textarea>
+                                                    </div>
+                                                    <div class="text-end">
+                                                        <button type="submit" class="btn btn-sm btn-primary"><i class="fa-solid fa-paper-plane me-1"></i> Post Comment</button>
+                                                    </div>
+                                                </form>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
 
                                 <!-- Edit Modal -->
                                 <div class="modal fade" id="editLobModal<?= (int)$lob['id'] ?>" tabindex="-1">

@@ -25,9 +25,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     if ($action === 'save_rates') {
         if (budsheets_save_settings($_POST)) {
-            $message = 'Tax, Currency Exchange Rates, and Fiscal Year settings updated successfully.';
+            $message = 'Default Tax, Currency Exchange Rates, and Fiscal Year settings updated successfully.';
         } else {
             $error = 'Failed to update settings.';
+        }
+    } elseif ($action === 'save_fy_rates') {
+        $fyTarget = (int)($_POST['target_fy'] ?? 0);
+        if ($fyTarget) {
+            budsheets_save_fy_rates($fyTarget, $_POST);
+            $message = "Tax and Exchange Rates for Financial Year FY{$fyTarget} updated successfully.";
+        } else {
+            $error = "Invalid Financial Year target.";
         }
     } elseif ($action === 'add_fy') {
         $fyVal = (int)($_POST['new_fy'] ?? 0);
@@ -138,7 +146,7 @@ $managedFyList = budsheets_get_managed_fiscal_years(true);
         <div class="col-lg-6">
             <div class="card border-0 shadow-sm h-100">
                 <div class="card-header bg-white py-3">
-                    <h5 class="fw-bold mb-0 text-dark"><i class="fa-solid fa-sliders me-2 text-primary"></i>Fiscal Year, Taxes & Currency Conversion</h5>
+                    <h5 class="fw-bold mb-0 text-dark"><i class="fa-solid fa-sliders me-2 text-primary"></i>Global Fiscal Year, Default Taxes & FX Rates</h5>
                 </div>
                 <div class="card-body">
                     <form method="POST">
@@ -173,7 +181,7 @@ $managedFyList = budsheets_get_managed_fiscal_years(true);
                             </div>
                         </div>
 
-                        <h6 class="fw-bold text-secondary mb-3"><i class="fa-solid fa-receipt me-1"></i>Tax Rates (%)</h6>
+                        <h6 class="fw-bold text-secondary mb-3"><i class="fa-solid fa-receipt me-1"></i>Default Tax Rates (%)</h6>
                         <div class="row g-3 mb-4">
                             <div class="col-6">
                                 <label class="form-label fw-semibold">GST Rate (%)</label>
@@ -191,7 +199,7 @@ $managedFyList = budsheets_get_managed_fiscal_years(true);
                             </div>
                         </div>
 
-                        <h6 class="fw-bold text-secondary mb-3"><i class="fa-solid fa-money-bill-transfer me-1"></i>Exchange Rates (1 Foreign Unit = X CAD)</h6>
+                        <h6 class="fw-bold text-secondary mb-3"><i class="fa-solid fa-money-bill-transfer me-1"></i>Default Exchange Rates (1 Foreign Unit = X CAD)</h6>
                         <div class="row g-3 mb-3">
                             <div class="col-6">
                                 <label class="form-label fw-semibold">1 USD in CAD</label>
@@ -213,7 +221,7 @@ $managedFyList = budsheets_get_managed_fiscal_years(true);
                         </div>
 
                         <div class="text-end mt-4">
-                            <button type="submit" class="btn btn-primary px-4"><i class="fa-solid fa-floppy-disk me-1"></i> Save Settings</button>
+                            <button type="submit" class="btn btn-primary px-4"><i class="fa-solid fa-floppy-disk me-1"></i> Save Global Settings</button>
                         </div>
                     </form>
                 </div>
@@ -251,6 +259,7 @@ $managedFyList = budsheets_get_managed_fiscal_years(true);
                                         $y = (int)$fyRow['year'];
                                         $isHidden = !empty($fyRow['is_hidden']);
                                         $isLocked = !empty($fyRow['is_locked']);
+                                        $fySettings = budsheets_get_settings($y);
                                     ?>
                                         <tr>
                                             <td class="ps-3 fw-bold text-dark">FY<?= $y ?></td>
@@ -258,7 +267,7 @@ $managedFyList = budsheets_get_managed_fiscal_years(true);
                                                 <?php if ($isHidden): ?>
                                                     <span class="badge bg-secondary"><i class="fa-solid fa-eye-slash me-1"></i>Hidden</span>
                                                 <?php else: ?>
-                                                    <span class="badge bg-info"><i class="fa-solid fa-eye me-1"></i>Active / Visible</span>
+                                                    <span class="badge bg-info"><i class="fa-solid fa-eye me-1"></i>Active</span>
                                                 <?php endif; ?>
                                             </td>
                                             <td>
@@ -269,6 +278,11 @@ $managedFyList = budsheets_get_managed_fiscal_years(true);
                                                 <?php endif; ?>
                                             </td>
                                             <td class="text-end pe-3">
+                                                <!-- Edit Year Tax & FX Rates -->
+                                                <button type="button" class="btn btn-sm btn-outline-primary me-1" data-bs-toggle="modal" data-bs-target="#editFyRatesModal<?= $y ?>" title="Configure FY<?= $y ?> Tax & FX Rates">
+                                                    <i class="fa-solid fa-percent me-1"></i>Rates
+                                                </button>
+
                                                 <!-- Toggle Hide/Unhide -->
                                                 <form method="POST" class="d-inline me-1">
                                                     <?php if (function_exists('csrf_field')) echo csrf_field(); ?>
@@ -302,6 +316,67 @@ $managedFyList = budsheets_get_managed_fiscal_years(true);
                                                 </form>
                                             </td>
                                         </tr>
+
+                                        <!-- Edit FY Rates Modal -->
+                                        <div class="modal fade" id="editFyRatesModal<?= $y ?>" tabindex="-1">
+                                            <div class="modal-dialog">
+                                                <div class="modal-content">
+                                                    <form method="POST">
+                                                        <?php if (function_exists('csrf_field')) echo csrf_field(); ?>
+                                                        <input type="hidden" name="action" value="save_fy_rates">
+                                                        <input type="hidden" name="target_fy" value="<?= $y ?>">
+                                                        <div class="modal-header">
+                                                            <h5 class="modal-title fw-bold"><i class="fa-solid fa-percent me-2 text-primary"></i>Financial Year FY<?= $y ?> Tax & FX Rates</h5>
+                                                            <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                                                        </div>
+                                                        <div class="modal-body">
+                                                            <p class="small text-muted mb-3">Configure specific tax rates and foreign exchange rates to CAD for FY<?= $y ?>.</p>
+                                                            <h6 class="fw-bold text-secondary mb-2">Tax Rates (%)</h6>
+                                                            <div class="row g-2 mb-3">
+                                                                <div class="col-6">
+                                                                    <label class="form-label small fw-semibold">GST Rate (%)</label>
+                                                                    <div class="input-group input-group-sm">
+                                                                        <input type="number" step="0.01" name="gst_rate" class="form-control" value="<?= e($fySettings['gst_rate']) ?>" required>
+                                                                        <span class="input-group-text">%</span>
+                                                                    </div>
+                                                                </div>
+                                                                <div class="col-6">
+                                                                    <label class="form-label small fw-semibold">PST Rate (%)</label>
+                                                                    <div class="input-group input-group-sm">
+                                                                        <input type="number" step="0.01" name="pst_rate" class="form-control" value="<?= e($fySettings['pst_rate']) ?>" required>
+                                                                        <span class="input-group-text">%</span>
+                                                                    </div>
+                                                                </div>
+                                                            </div>
+
+                                                            <h6 class="fw-bold text-secondary mb-2">Exchange Rates to CAD</h6>
+                                                            <div class="row g-2 mb-3">
+                                                                <div class="col-6">
+                                                                    <label class="form-label small fw-semibold">1 USD in CAD</label>
+                                                                    <input type="number" step="0.0001" name="rate_USD" class="form-control form-control-sm" value="<?= e($fySettings['rate_USD']) ?>" required>
+                                                                </div>
+                                                                <div class="col-6">
+                                                                    <label class="form-label small fw-semibold">1 EUR in CAD</label>
+                                                                    <input type="number" step="0.0001" name="rate_EUR" class="form-control form-control-sm" value="<?= e($fySettings['rate_EUR']) ?>" required>
+                                                                </div>
+                                                                <div class="col-6">
+                                                                    <label class="form-label small fw-semibold">1 GBP in CAD</label>
+                                                                    <input type="number" step="0.0001" name="rate_GBP" class="form-control form-control-sm" value="<?= e($fySettings['rate_GBP']) ?>" required>
+                                                                </div>
+                                                                <div class="col-6">
+                                                                    <label class="form-label small fw-semibold">1 AUD in CAD</label>
+                                                                    <input type="number" step="0.0001" name="rate_AUD" class="form-control form-control-sm" value="<?= e($fySettings['rate_AUD']) ?>" required>
+                                                                </div>
+                                                            </div>
+                                                        </div>
+                                                        <div class="modal-footer">
+                                                            <button type="button" class="btn btn-light" data-bs-dismiss="modal">Cancel</button>
+                                                            <button type="submit" class="btn btn-primary">Save FY<?= $y ?> Rates</button>
+                                                        </div>
+                                                    </form>
+                                                </div>
+                                            </div>
+                                        </div>
                                     <?php endforeach; ?>
                                 <?php endif; ?>
                             </tbody>

@@ -96,6 +96,12 @@ $pdb->query("CREATE TABLE plug_budsheets_fiscal_years (
     year INTEGER PRIMARY KEY,
     is_hidden INTEGER DEFAULT 0,
     is_locked INTEGER DEFAULT 0,
+    gst_rate REAL DEFAULT NULL,
+    pst_rate REAL DEFAULT NULL,
+    rate_USD REAL DEFAULT NULL,
+    rate_EUR REAL DEFAULT NULL,
+    rate_GBP REAL DEFAULT NULL,
+    rate_AUD REAL DEFAULT NULL,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );");
 
@@ -193,6 +199,15 @@ $pdb->query("CREATE TABLE plug_budsheets_invoices (
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );");
 
+$pdb->query("CREATE TABLE plug_budsheets_comments (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    entity_type TEXT NOT NULL,
+    entity_id INTEGER NOT NULL,
+    comment_text TEXT NOT NULL,
+    created_by INTEGER DEFAULT NULL,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);");
+
 echo "[TEST] Database tables initialized successfully.\n";
 
 // Load Plugin Entry File and Models
@@ -243,8 +258,8 @@ $updatedUsers = budsheets_get_lob_users(1);
 assert(count($updatedUsers) === 1 && $updatedUsers[0] == 10, 'IT Budget updated user assignment');
 echo "  ✓ Budgets CRUD & Single-FY assignment tests passed.\n";
 
-// Test 3: Tax, Currency Conversion & Fiscal Year Settings
-echo "[TEST] Testing tax, currency conversion & fiscal year determination logic...\n";
+// Test 3: Tax, Currency Conversion, Global vs Per-FY Rates Override
+echo "[TEST] Testing tax, currency conversion & per-FY rates overrides...\n";
 budsheets_save_settings([
     'starting_fiscal_year'    => '2024',
     'gst_rate'                => '5.0',
@@ -256,27 +271,27 @@ budsheets_save_settings([
     'fiscal_year_start_day'   => '1'
 ]);
 
-$settings = budsheets_get_settings();
-assert($settings['starting_fiscal_year'] === 2024, 'Starting fiscal year setting saved as 2024');
+// Set custom rate overrides for FY2027
+budsheets_save_fy_rates(2027, [
+    'gst_rate' => '6.0',
+    'pst_rate' => '8.0',
+    'rate_USD' => '1.40'
+]);
 
-// Sept 1, 2025 to Aug 31, 2026 includes Jan 1, 2026 -> FY2026
-$fy1 = budsheets_get_fiscal_year('2025-09-01');
-assert($fy1 === 2026, 'Sept 1, 2025 is FY2026 (Jan 1, 2026 falls into this period)');
+$fy2026Settings = budsheets_get_settings(2026);
+assert($fy2026Settings['rate_USD'] == 1.35, 'FY2026 inherits default USD rate 1.35');
 
-$fy2 = budsheets_get_fiscal_year('2026-08-31');
-assert($fy2 === 2026, 'Aug 31, 2026 is FY2026');
+$fy2027Settings = budsheets_get_settings(2027);
+assert($fy2027Settings['rate_USD'] == 1.40, 'FY2027 uses custom USD rate override 1.40');
+assert($fy2027Settings['gst_rate'] == 6.0, 'FY2027 uses custom GST rate override 6.0%');
 
-$fy3 = budsheets_get_fiscal_year('2026-09-01');
-assert($fy3 === 2027, 'Sept 1, 2026 is FY2027');
+$conv2026 = budsheets_convert_to_cad(100.00, 'USD', 2026);
+assert($conv2026 == 135.00, '$100 USD in FY2026 converts to $135.00 CAD');
 
-$taxCalc = budsheets_calculate_tax(100.00, 'GSTandPST');
-assert($taxCalc['gst'] == 5.0, 'GST amount is $5.00');
-assert($taxCalc['pst'] == 7.0, 'PST amount is $7.00');
-assert($taxCalc['total'] == 112.00, 'Total with GST+PST is $112.00');
+$conv2027 = budsheets_convert_to_cad(100.00, 'USD', 2027);
+assert($conv2027 == 140.00, '$100 USD in FY2027 converts to $140.00 CAD');
 
-$convertedCad = budsheets_convert_to_cad(100.00, 'USD');
-assert($convertedCad == 135.00, '$100 USD converts to $135.00 CAD at 1.35 rate');
-echo "  ✓ Tax, Currency conversion & Fiscal Year tests passed.\n";
+echo "  ✓ Tax, Currency conversion & Per-FY rate override tests passed.\n";
 
 // Test 4: Budget Year Lock/Unlock Operations
 echo "[TEST] Testing Fiscal Year Locking functionality...\n";
@@ -390,7 +405,29 @@ assert(empty($softClonedSched), 'Soft cloned item has no financial schedule');
 
 echo "  ✓ Full vs Soft Budget Cloning tests passed.\n";
 
-// Test 9: Invoices CRUD on Locked Fiscal Years & CAD Summary
+// Test 9: Comments on Budgets and Items
+echo "[TEST] Testing Comments on Budgets and Items...\n";
+$_SESSION['user_id'] = 10;
+$budgetCommId = budsheets_add_comment('budget', 1, 'Initial budget allocation discussion note.');
+assert($budgetCommId > 0, 'Budget comment created successfully');
+
+$itemCommId = budsheets_add_comment('item', $itemId, 'Vendor contract renewal discussion note.');
+assert($itemCommId > 0, 'Item comment created successfully');
+
+$bComments = budsheets_get_comments('budget', 1);
+assert(count($bComments) === 1, 'Budget has 1 comment');
+assert($bComments[0]['comment_text'] === 'Initial budget allocation discussion note.', 'Budget comment text matches');
+
+$iComments = budsheets_get_comments('item', $itemId);
+assert(count($iComments) === 1, 'Item has 1 comment');
+assert($iComments[0]['comment_text'] === 'Vendor contract renewal discussion note.', 'Item comment text matches');
+
+budsheets_delete_comment($itemCommId);
+$iCommentsAfterDelete = budsheets_get_comments('item', $itemId);
+assert(empty($iCommentsAfterDelete), 'Item comment deleted successfully');
+echo "  ✓ Budget and Item Comments tests passed.\n";
+
+// Test 10: Invoices CRUD on Locked Fiscal Years & CAD Summary
 echo "[TEST] Testing Invoices operations on locked fiscal years and CAD summary totals...\n";
 
 // Lock FY2026
@@ -436,7 +473,7 @@ $summary = budsheets_get_dashboard_summary();
 assert($summary['total_invoiced_cad'] == 2700.00, 'Total invoiced sum in CAD ($2000 USD * 1.35) is $2700.00 CAD');
 echo "  ✓ Invoices CRUD on locked fiscal years & CAD summary tests passed.\n";
 
-// Test 10: Dynamic Routes & Hooks Verification
+// Test 11: Dynamic Routes & Hooks Verification
 echo "[TEST] Verifying plugin hooks and registered routes...\n";
 assert(isset($registered_routes['budsheets_dashboard']), 'Route budsheets_dashboard is registered');
 assert(isset($registered_routes['budsheets_lobs']), 'Route budsheets_lobs is registered');

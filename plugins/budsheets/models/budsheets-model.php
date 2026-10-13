@@ -50,8 +50,32 @@ function budsheets_ensure_tables_exist($pdb) {
                 year INT PRIMARY KEY,
                 is_hidden TINYINT(1) NOT NULL DEFAULT 0,
                 is_locked TINYINT(1) NOT NULL DEFAULT 0,
+                gst_rate DECIMAL(5,2) DEFAULT NULL,
+                pst_rate DECIMAL(5,2) DEFAULT NULL,
+                rate_USD DECIMAL(8,4) DEFAULT NULL,
+                rate_EUR DECIMAL(8,4) DEFAULT NULL,
+                rate_GBP DECIMAL(8,4) DEFAULT NULL,
+                rate_AUD DECIMAL(8,4) DEFAULT NULL,
                 created_at DATETIME DEFAULT CURRENT_TIMESTAMP
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;");
+        } catch (Exception $ex) {
+            // Ignore
+        }
+    }
+
+    // Auto-migrate per-FY tax and FX rate columns in fiscal_years if missing
+    try {
+        $fyTable = $pdb->getTableName('fiscal_years');
+        $pdb->query("SELECT gst_rate FROM {$fyTable} LIMIT 1");
+    } catch (Exception $e) {
+        try {
+            $fyTable = $pdb->getTableName('fiscal_years');
+            $pdb->query("ALTER TABLE {$fyTable} ADD COLUMN gst_rate DECIMAL(5,2) DEFAULT NULL");
+            $pdb->query("ALTER TABLE {$fyTable} ADD COLUMN pst_rate DECIMAL(5,2) DEFAULT NULL");
+            $pdb->query("ALTER TABLE {$fyTable} ADD COLUMN rate_USD DECIMAL(8,4) DEFAULT NULL");
+            $pdb->query("ALTER TABLE {$fyTable} ADD COLUMN rate_EUR DECIMAL(8,4) DEFAULT NULL");
+            $pdb->query("ALTER TABLE {$fyTable} ADD COLUMN rate_GBP DECIMAL(8,4) DEFAULT NULL");
+            $pdb->query("ALTER TABLE {$fyTable} ADD COLUMN rate_AUD DECIMAL(8,4) DEFAULT NULL");
         } catch (Exception $ex) {
             // Ignore
         }
@@ -142,6 +166,27 @@ function budsheets_ensure_tables_exist($pdb) {
         }
     }
 
+    // Auto-create comments table if missing
+    try {
+        $commTable = $pdb->getTableName('comments');
+        $pdb->query("SELECT 1 FROM {$commTable} LIMIT 1");
+    } catch (Exception $e) {
+        try {
+            $commTable = $pdb->getTableName('comments');
+            $pdb->query("CREATE TABLE IF NOT EXISTS {$commTable} (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                entity_type ENUM('budget', 'item') NOT NULL,
+                entity_id INT NOT NULL,
+                comment_text TEXT NOT NULL,
+                created_by INT DEFAULT NULL,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                INDEX (entity_type, entity_id)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;");
+        } catch (Exception $ex) {
+            // Ignore
+        }
+    }
+
     // Auto-create item_monthly_schedules table if missing
     try {
         $schedTable = $pdb->getTableName('item_monthly_schedules');
@@ -220,7 +265,7 @@ function budsheets_is_allowed_extension($filename) {
 // Tax, Currency Exchange, Starting Year & Lock Settings
 // ==========================================
 
-function budsheets_get_settings() {
+function budsheets_get_settings($fiscal_year = null) {
     $defaultSettings = [
         'starting_fiscal_year'     => (int)date('Y'),
         'gst_rate'                 => 5.0,
@@ -244,6 +289,23 @@ function budsheets_get_settings() {
         }
     }
     $settings['starting_fiscal_year'] = (int)($settings['starting_fiscal_year'] ?? date('Y'));
+
+    // Check year-specific tax & exchange rate overrides
+    if ($fiscal_year !== null) {
+        $pdb = budsheets_db();
+        if ($pdb) {
+            $fyTable = $pdb->getTableName('fiscal_years');
+            $fyRow = $pdb->query("SELECT gst_rate, pst_rate, rate_USD, rate_EUR, rate_GBP, rate_AUD FROM {$fyTable} WHERE year = ?", [(int)$fiscal_year])->fetch();
+            if ($fyRow) {
+                foreach (['gst_rate', 'pst_rate', 'rate_USD', 'rate_EUR', 'rate_GBP', 'rate_AUD'] as $k) {
+                    if (isset($fyRow[$k]) && $fyRow[$k] !== null && $fyRow[$k] !== '') {
+                        $settings[$k] = (float)$fyRow[$k];
+                    }
+                }
+            }
+        }
+    }
+
     return $settings;
 }
 
@@ -259,6 +321,27 @@ function budsheets_save_settings($data) {
             set_plugin_setting('budsheets', $f, (float)$data[$f]);
         }
     }
+    return true;
+}
+
+function budsheets_save_fy_rates($fiscal_year, $rates) {
+    $pdb = budsheets_db();
+    if (!$pdb) return false;
+
+    $fy = (int)$fiscal_year;
+    budsheets_add_fiscal_year($fy);
+
+    $table = $pdb->getTableName('fiscal_years');
+    $sql = "UPDATE {$table} SET gst_rate = ?, pst_rate = ?, rate_USD = ?, rate_EUR = ?, rate_GBP = ?, rate_AUD = ? WHERE year = ?";
+    $pdb->query($sql, [
+        isset($rates['gst_rate']) && $rates['gst_rate'] !== '' ? (float)$rates['gst_rate'] : null,
+        isset($rates['pst_rate']) && $rates['pst_rate'] !== '' ? (float)$rates['pst_rate'] : null,
+        isset($rates['rate_USD']) && $rates['rate_USD'] !== '' ? (float)$rates['rate_USD'] : null,
+        isset($rates['rate_EUR']) && $rates['rate_EUR'] !== '' ? (float)$rates['rate_EUR'] : null,
+        isset($rates['rate_GBP']) && $rates['rate_GBP'] !== '' ? (float)$rates['rate_GBP'] : null,
+        isset($rates['rate_AUD']) && $rates['rate_AUD'] !== '' ? (float)$rates['rate_AUD'] : null,
+        $fy
+    ]);
     return true;
 }
 
@@ -435,10 +518,10 @@ function budsheets_get_fiscal_year_months() {
 }
 
 /**
- * Convert any currency amount to CAD based on settings
+ * Convert any currency amount to CAD based on settings (supporting year-specific FX rates)
  */
-function budsheets_convert_to_cad($amount, $currency = 'CAD') {
-    $settings = budsheets_get_settings();
+function budsheets_convert_to_cad($amount, $currency = 'CAD', $fiscal_year = null) {
+    $settings = budsheets_get_settings($fiscal_year);
     $curr = strtoupper(trim($currency ?: 'CAD'));
     $rateKey = 'rate_' . $curr;
     $rate = $settings[$rateKey] ?? 1.0;
@@ -446,16 +529,16 @@ function budsheets_convert_to_cad($amount, $currency = 'CAD') {
 }
 
 /**
- * Calculate cost breakdown and tax for an item (supporting monthly or yearly billing frequency)
+ * Calculate cost breakdown and tax for an item (supporting monthly or yearly billing frequency and year-specific rates)
  */
-function budsheets_calculate_item_cost_and_tax($rawAmount, $billingFrequency, $taxType) {
+function budsheets_calculate_item_cost_and_tax($rawAmount, $billingFrequency, $taxType, $fiscal_year = null) {
     $amount = (float)$rawAmount;
     $freq = strtolower($billingFrequency) === 'yearly' ? 'yearly' : 'monthly';
 
     $monthlyBase = $freq === 'yearly' ? ($amount / 12.0) : $amount;
     $annualBase = $freq === 'yearly' ? $amount : ($amount * 12.0);
 
-    $settings = budsheets_get_settings();
+    $settings = budsheets_get_settings($fiscal_year);
     $gstRate = $settings['gst_rate'] / 100.0;
     $pstRate = $settings['pst_rate'] / 100.0;
 
@@ -494,8 +577,8 @@ function budsheets_calculate_item_cost_and_tax($rawAmount, $billingFrequency, $t
 /**
  * Helper wrapper for backward compatibility
  */
-function budsheets_calculate_tax($amount, $taxType, $billingFrequency = 'monthly') {
-    $calc = budsheets_calculate_item_cost_and_tax($amount, $billingFrequency, $taxType);
+function budsheets_calculate_tax($amount, $taxType, $billingFrequency = 'monthly', $fiscal_year = null) {
+    $calc = budsheets_calculate_item_cost_and_tax($amount, $billingFrequency, $taxType, $fiscal_year);
     return [
         'base'  => $calc['monthly_base'],
         'gst'   => $calc['monthly_gst'],
@@ -559,9 +642,7 @@ function budsheets_save_item_monthly_schedule($item_id, $fiscal_year, $monthly_a
 }
 
 /**
- * Calculates item cost and tax for a specific fiscal year.
- * Rule: Financial info is NOT auto-filled / carried over from year to year unless
- * an explicit schedule exists for that fiscal year OR if it matches the item's budget fiscal year.
+ * Calculates item cost and tax for a specific fiscal year taking year-specific rates into account.
  */
 function budsheets_calculate_item_fy_cost($item, $fiscal_year = null) {
     if (!$fiscal_year) {
@@ -573,7 +654,7 @@ function budsheets_calculate_item_fy_cost($item, $fiscal_year = null) {
     if (!empty($sched)) {
         $annualBase = array_sum($sched);
 
-        $calc = budsheets_calculate_item_cost_and_tax($annualBase, 'yearly', $item['tax_type']);
+        $calc = budsheets_calculate_item_cost_and_tax($annualBase, 'yearly', $item['tax_type'], $fiscal_year);
         $calc['monthly_schedule'] = $sched;
         $calc['has_custom_schedule'] = true;
         return $calc;
@@ -592,17 +673,93 @@ function budsheets_calculate_item_fy_cost($item, $fiscal_year = null) {
     }
 
     if ($isInitialOrContractYear) {
-        $calc = budsheets_calculate_item_cost_and_tax((float)$item['monthly_cost'], $item['billing_frequency'] ?? 'monthly', $item['tax_type']);
+        $calc = budsheets_calculate_item_cost_and_tax((float)$item['monthly_cost'], $item['billing_frequency'] ?? 'monthly', $item['tax_type'], $fiscal_year);
         $calc['monthly_schedule'] = [];
         $calc['has_custom_schedule'] = false;
         return $calc;
     }
 
     // Do NOT auto fill / carry over financial info to unallocated fiscal years
-    $calc = budsheets_calculate_item_cost_and_tax(0.00, 'monthly', $item['tax_type']);
+    $calc = budsheets_calculate_item_cost_and_tax(0.00, 'monthly', $item['tax_type'], $fiscal_year);
     $calc['monthly_schedule'] = [];
     $calc['has_custom_schedule'] = false;
     return $calc;
+}
+
+// ==========================================
+// Comments Operations
+// ==========================================
+
+function budsheets_get_comments($entity_type, $entity_id) {
+    $pdb = budsheets_db();
+    if (!$pdb) return [];
+
+    $table = $pdb->getTableName('comments');
+    $rows = $pdb->query("SELECT * FROM {$table} WHERE entity_type = ? AND entity_id = ? ORDER BY created_at ASC", [
+        $entity_type,
+        (int)$entity_id
+    ])->fetchAll();
+
+    $users = budsheets_get_all_system_users();
+    $userMap = [];
+    foreach ($users as $u) {
+        $userMap[$u['id']] = $u['name'];
+    }
+
+    foreach ($rows as &$r) {
+        $uid = (int)($r['created_by'] ?? 0);
+        $r['author_name'] = $userMap[$uid] ?? ($uid ? 'User #' . $uid : 'System User');
+    }
+    unset($r);
+
+    return $rows;
+}
+
+function budsheets_add_comment($entity_type, $entity_id, $comment_text) {
+    $pdb = budsheets_db();
+    if (!$pdb || empty(trim($comment_text))) return false;
+
+    // Check access rights
+    if ($entity_type === 'budget') {
+        if (!budsheets_user_has_lob_access($entity_id)) {
+            die('Access Denied: You do not have permissions for this Budget.');
+        }
+    } elseif ($entity_type === 'item') {
+        $item = budsheets_get_item($entity_id);
+        if (!$item) {
+            die('Access Denied: Target budget item not found or access restricted.');
+        }
+    } else {
+        return false;
+    }
+
+    $table = $pdb->getTableName('comments');
+    $userId = $_SESSION['user_id'] ?? null;
+
+    $pdb->query("INSERT INTO {$table} (entity_type, entity_id, comment_text, created_by) VALUES (?, ?, ?, ?)", [
+        $entity_type,
+        (int)$entity_id,
+        trim($comment_text),
+        $userId
+    ]);
+    return budsheets_last_insert_id($pdb);
+}
+
+function budsheets_delete_comment($comment_id) {
+    $pdb = budsheets_db();
+    if (!$pdb) return false;
+
+    $table = $pdb->getTableName('comments');
+    $comment = $pdb->query("SELECT * FROM {$table} WHERE id = ?", [(int)$comment_id])->fetch();
+
+    if ($comment) {
+        $currentUserId = $_SESSION['user_id'] ?? 0;
+        if (!has_permission('budsheets_admin') && (int)$comment['created_by'] !== (int)$currentUserId) {
+            die('Access Denied: You cannot delete this comment.');
+        }
+        return $pdb->query("DELETE FROM {$table} WHERE id = ?", [(int)$comment_id]);
+    }
+    return false;
 }
 
 // ==========================================
@@ -1335,9 +1492,10 @@ function budsheets_get_dashboard_summary() {
     if (!empty($items)) {
         $itemIds = array_column($items, 'id');
         $placeholders = implode(',', array_fill(0, count($itemIds), '?'));
-        $invoices = $pdb->query("SELECT amount_paid, currency FROM {$invTable} WHERE item_id IN ({$placeholders})", $itemIds)->fetchAll();
+        $invoices = $pdb->query("SELECT amount_paid, currency, period_year FROM {$invTable} WHERE item_id IN ({$placeholders})", $itemIds)->fetchAll();
         foreach ($invoices as $inv) {
-            $totalInvoicedCad += budsheets_convert_to_cad($inv['amount_paid'], $inv['currency']);
+            $invFy = (int)($inv['period_year'] ?? date('Y'));
+            $totalInvoicedCad += budsheets_convert_to_cad($inv['amount_paid'], $inv['currency'], $invFy);
         }
     }
 
@@ -1348,8 +1506,8 @@ function budsheets_get_dashboard_summary() {
     foreach ($items as $item) {
         $itemFy = !empty($item['lob_fiscal_year']) ? (int)$item['lob_fiscal_year'] : $fy;
         $fyCalc = budsheets_calculate_item_fy_cost($item, $itemFy);
-        $monthlyCostCad += budsheets_convert_to_cad($fyCalc['monthly_total'], $item['currency']);
-        $annualCostCad += budsheets_convert_to_cad($fyCalc['annual_total'], $item['currency']);
+        $monthlyCostCad += budsheets_convert_to_cad($fyCalc['monthly_total'], $item['currency'], $itemFy);
+        $annualCostCad += budsheets_convert_to_cad($fyCalc['annual_total'], $item['currency'], $itemFy);
     }
 
     return [
@@ -1474,9 +1632,9 @@ function budsheets_export_items_csv() {
 
     foreach ($items as $item) {
         $costCalc = budsheets_calculate_item_fy_cost($item, $fy);
-        $amountCad = budsheets_convert_to_cad((float)$item['monthly_cost'], $item['currency']);
-        $fullFyCad = budsheets_convert_to_cad($costCalc['annual_total'], $item['currency']);
-        $monthlyAvgCad = budsheets_convert_to_cad($costCalc['monthly_total'], $item['currency']);
+        $amountCad = budsheets_convert_to_cad((float)$item['monthly_cost'], $item['currency'], $fy);
+        $fullFyCad = budsheets_convert_to_cad($costCalc['annual_total'], $item['currency'], $fy);
+        $monthlyAvgCad = budsheets_convert_to_cad($costCalc['monthly_total'], $item['currency'], $fy);
 
         $invMonthStr = 'N/A';
         if (($item['billing_frequency'] ?? 'monthly') === 'yearly' && !empty($item['invoice_month'])) {
@@ -1503,8 +1661,8 @@ function budsheets_export_items_csv() {
         $defaultMonthlyBase = ($item['billing_frequency'] === 'yearly') ? ((float)$item['monthly_cost'] / 12.0) : (float)$item['monthly_cost'];
         foreach ($fyMonthsOrder as $mNum) {
             $mAmount = isset($costCalc['monthly_schedule'][$mNum]) ? $costCalc['monthly_schedule'][$mNum] : ($costCalc['has_custom_schedule'] ? 0.0 : $defaultMonthlyBase);
-            $mTax = budsheets_calculate_tax($mAmount, $item['tax_type'], 'monthly');
-            $mCad = budsheets_convert_to_cad($mTax['total'], $item['currency']);
+            $mTax = budsheets_calculate_tax($mAmount, $item['tax_type'], 'monthly', $fy);
+            $mCad = budsheets_convert_to_cad($mTax['total'], $item['currency'], $fy);
             $row[] = number_format($mCad, 2, '.', '');
         }
 

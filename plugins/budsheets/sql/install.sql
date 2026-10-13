@@ -2,6 +2,12 @@ CREATE TABLE IF NOT EXISTS `plug_budsheets_fiscal_years` (
     `year` INT PRIMARY KEY,
     `is_hidden` TINYINT(1) NOT NULL DEFAULT 0,
     `is_locked` TINYINT(1) NOT NULL DEFAULT 0,
+    `gst_rate` DECIMAL(5,2) DEFAULT NULL,
+    `pst_rate` DECIMAL(5,2) DEFAULT NULL,
+    `rate_USD` DECIMAL(8,4) DEFAULT NULL,
+    `rate_EUR` DECIMAL(8,4) DEFAULT NULL,
+    `rate_GBP` DECIMAL(8,4) DEFAULT NULL,
+    `rate_AUD` DECIMAL(8,4) DEFAULT NULL,
     `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
@@ -109,4 +115,14 @@ CREATE TABLE IF NOT EXISTS `plug_budsheets_invoices` (
     `updated_at` DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     INDEX (`item_id`),
     CONSTRAINT `fk_budsheets_invoices_item` FOREIGN KEY (`item_id`) REFERENCES `plug_budsheets_items`(`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS `plug_budsheets_comments` (
+    `id` INT AUTO_INCREMENT PRIMARY KEY,
+    `entity_type` ENUM('budget', 'item') NOT NULL,
+    `entity_id` INT NOT NULL,
+    `comment_text` TEXT NOT NULL,
+    `created_by` INT DEFAULT NULL,
+    `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP,
+    INDEX (`entity_type`, `entity_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

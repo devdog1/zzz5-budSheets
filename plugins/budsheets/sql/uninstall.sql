@@ -1,3 +1,4 @@
+DROP TABLE IF EXISTS `plug_budsheets_comments`;
 DROP TABLE IF EXISTS `plug_budsheets_invoices`;
 DROP TABLE IF EXISTS `plug_budsheets_contract_files`;
 DROP TABLE IF EXISTS `plug_budsheets_item_monthly_schedules`;
