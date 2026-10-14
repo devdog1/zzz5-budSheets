@@ -133,6 +133,19 @@ function budsheets_ensure_tables_exist($pdb) {
         }
     }
 
+    // Auto-migrate access_level column in lob_users table if missing
+    try {
+        $lobUsersTable = $pdb->getTableName('lob_users');
+        $pdb->query("SELECT access_level FROM {$lobUsersTable} LIMIT 1");
+    } catch (Exception $e) {
+        try {
+            $lobUsersTable = $pdb->getTableName('lob_users');
+            $pdb->query("ALTER TABLE {$lobUsersTable} ADD COLUMN access_level VARCHAR(20) NOT NULL DEFAULT 'full'");
+        } catch (Exception $ex) {
+            // Ignore
+        }
+    }
+
     // Auto-create class_lobs table if missing
     try {
         $classLobsTable = $pdb->getTableName('class_lobs');
@@ -952,19 +965,83 @@ function budsheets_get_lob_users($lob_id) {
     return array_column($rows, 'user_id');
 }
 
-function budsheets_set_lob_users($lob_id, $user_ids = []) {
+function budsheets_get_lob_user_assignments($lob_id) {
+    $pdb = budsheets_db();
+    if (!$pdb) return [];
+    $table = $pdb->getTableName('lob_users');
+    $rows = $pdb->query("SELECT user_id, access_level FROM {$table} WHERE lob_id = ?", [(int)$lob_id])->fetchAll();
+    $assignments = [];
+    foreach ($rows as $r) {
+        $assignments[(int)$r['user_id']] = $r['access_level'] ?? 'full';
+    }
+    return $assignments;
+}
+
+function budsheets_set_lob_users($lob_id, $user_assignments = []) {
     $pdb = budsheets_db();
     if (!$pdb) return false;
     $table = $pdb->getTableName('lob_users');
 
     $pdb->query("DELETE FROM {$table} WHERE lob_id = ?", [(int)$lob_id]);
 
-    if (!empty($user_ids)) {
-        foreach ($user_ids as $uid) {
-            $pdb->query("INSERT INTO {$table} (lob_id, user_id) VALUES (?, ?)", [(int)$lob_id, (int)$uid]);
+    if (!empty($user_assignments)) {
+        foreach ($user_assignments as $key => $val) {
+            if (is_numeric($key)) {
+                $uid = (int)$key;
+                $level = is_string($val) ? $val : 'full';
+            } else {
+                $uid = (int)$val;
+                $level = 'full';
+            }
+            if ($uid > 0) {
+                if (!in_array($level, ['full', 'read_only', 'hide_costs'], true)) {
+                    $level = 'full';
+                }
+                $pdb->query("INSERT INTO {$table} (lob_id, user_id, access_level) VALUES (?, ?, ?)", [(int)$lob_id, $uid, $level]);
+            }
         }
     }
     return true;
+}
+
+function budsheets_get_user_lob_access_level($lob_id, $user_id = null) {
+    if (has_permission('budsheets_admin')) {
+        return 'full';
+    }
+
+    $currentUserId = ($user_id !== null) ? $user_id : ($_SESSION['user_id'] ?? 0);
+    $pdb = budsheets_db();
+    if (!$pdb) return 'none';
+
+    $table = $pdb->getTableName('lob_users');
+
+    $row = $pdb->query("SELECT access_level FROM {$table} WHERE lob_id = ? AND user_id = ?", [(int)$lob_id, (int)$currentUserId])->fetch();
+    if ($row && !empty($row['access_level'])) {
+        return $row['access_level'];
+    }
+
+    $hasAssignments = $pdb->query("SELECT 1 FROM {$table} WHERE lob_id = ? LIMIT 1", [(int)$lob_id])->fetch();
+    if (!$hasAssignments) {
+        return 'full';
+    }
+
+    return 'none';
+}
+
+function budsheets_user_can_edit_lob($lob_id, $user_id = null) {
+    if (!has_permission('budsheets_edit')) {
+        return false;
+    }
+    $level = budsheets_get_user_lob_access_level($lob_id, $user_id);
+    return $level === 'full';
+}
+
+function budsheets_user_should_hide_costs($lob_id, $user_id = null) {
+    if (has_permission('budsheets_admin')) {
+        return false;
+    }
+    $level = budsheets_get_user_lob_access_level($lob_id, $user_id);
+    return $level === 'hide_costs';
 }
 
 function budsheets_get_all_system_users() {
@@ -1199,6 +1276,9 @@ function budsheets_save_item($data, $item_id = null) {
     if (!budsheets_user_has_lob_access($lobId)) {
         die('Access Denied: You do not have permissions for this Budget.');
     }
+    if (!budsheets_user_can_edit_lob($lobId)) {
+        die('Access Denied: Read-only access for this Budget.');
+    }
 
     if ($item_id) {
         $existing = budsheets_get_item($item_id);
@@ -1260,6 +1340,9 @@ function budsheets_delete_item($id) {
     if (!$item) {
         die('Access Denied: Budget item not found or access restricted.');
     }
+    if (!budsheets_user_can_edit_lob($item['lob_id'])) {
+        die('Access Denied: Read-only access for this Budget.');
+    }
 
     $itemFy = !empty($item['lob_fiscal_year']) ? (int)$item['lob_fiscal_year'] : budsheets_get_fiscal_year($item['contract_start_date'] ?: ($item['created_at'] ?? null));
     if (budsheets_is_fiscal_year_locked($itemFy)) {
@@ -1310,6 +1393,9 @@ function budsheets_save_contract_files($item_id, $files_array) {
     $item = budsheets_get_item($item_id);
     if (!$item) {
         die('Access Denied: Budget item not found or access restricted.');
+    }
+    if (!budsheets_user_can_edit_lob($item['lob_id'])) {
+        die('Access Denied: Read-only access for this Budget.');
     }
 
     $pdb = budsheets_db();
@@ -1393,6 +1479,9 @@ function budsheets_save_invoice($data, $file = null, $invoice_id = null) {
     $item = budsheets_get_item($itemId);
     if (!$item) {
         die('Access Denied: Target budget item not found or access restricted.');
+    }
+    if (!budsheets_user_can_edit_lob($item['lob_id'])) {
+        die('Access Denied: Read-only access for this Budget.');
     }
 
     $pdb = budsheets_db();

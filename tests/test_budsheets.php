@@ -508,4 +508,31 @@ assert($summary2027['lob_count'] === 2 && $summary2027['item_count'] === 2, 'FY2
 
 echo "  ✓ View structure & FY -> Budget -> Item hierarchy tests passed.\n";
 
+// Test 13: Read-Only and Hide-Costs LOB User Access Levels
+echo "[TEST] Testing Read-Only and Read-Only Hide-Costs User Access Levels...\n";
+budsheets_set_lob_users(1, [
+    20 => 'read_only',
+    21 => 'hide_costs'
+]);
+
+$level20 = budsheets_get_user_lob_access_level(1, 20);
+assert($level20 === 'read_only', 'User 20 has read_only access level on LOB 1');
+
+$level21 = budsheets_get_user_lob_access_level(1, 21);
+assert($level21 === 'hide_costs', 'User 21 has hide_costs access level on LOB 1');
+
+$user_permissions = ['budsheets_view', 'budsheets_edit']; // Non-admin user
+
+assert(budsheets_user_can_edit_lob(1, 20) === false, 'User 20 cannot edit LOB 1 (read_only)');
+assert(budsheets_user_should_hide_costs(1, 20) === false, 'User 20 does not hide costs');
+
+assert(budsheets_user_can_edit_lob(1, 21) === false, 'User 21 cannot edit LOB 1 (hide_costs)');
+assert(budsheets_user_should_hide_costs(1, 21) === true, 'User 21 should hide costs on LOB 1');
+
+// Restore admin permissions and session user
+$user_permissions = ['budsheets_view', 'budsheets_edit', 'budsheets_admin'];
+$_SESSION['user_id'] = 1;
+
+echo "  ✓ Read-Only and Hide-Costs access level tests passed.\n";
+
 echo "\nALL BUDSHEETS PLUGIN TESTS PASSED SUCCESSFULLY!\n";

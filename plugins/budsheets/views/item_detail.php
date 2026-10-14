@@ -146,6 +146,8 @@ $fullMonthsNames = [
 ];
 
 $currentUserId = $_SESSION['user_id'] ?? 0;
+$canEditLob = budsheets_user_can_edit_lob($item['lob_id']);
+$hideItemCosts = budsheets_user_should_hide_costs($item['lob_id']);
 ?>
 
 <div class="container-fluid py-4">
@@ -161,7 +163,7 @@ $currentUserId = $_SESSION['user_id'] ?? 0;
             <a href="<?= url_for('budsheets_items') ?>" class="btn btn-outline-secondary me-2">
                 <i class="fa-solid fa-arrow-left me-1"></i> Back to Items
             </a>
-            <?php if (has_permission('budsheets_edit') && !$isItemFyLocked): ?>
+            <?php if (has_permission('budsheets_edit') && !$isItemFyLocked && $canEditLob): ?>
                 <a href="<?= url_for('budsheets_items') ?>&action=edit&id=<?= (int)$item['id'] ?>" class="btn btn-primary">
                     <i class="fa-solid fa-pen-to-square me-1"></i> Edit Item
                 </a>
@@ -203,7 +205,9 @@ $currentUserId = $_SESSION['user_id'] ?? 0;
                     <div class="row g-3">
                         <div class="col-md-4">
                             <div class="small text-muted">Entered / FY Base Cost</div>
-                            <?php if ($fyCalc['has_custom_schedule']): ?>
+                            <?php if ($hideItemCosts): ?>
+                                <div><span class="badge bg-secondary-subtle text-secondary border fs-6"><i class="fa-solid fa-eye-slash me-1"></i>Hidden</span></div>
+                            <?php elseif ($fyCalc['has_custom_schedule']): ?>
                                 <div class="fs-5 fw-bold text-dark">$<?= number_format($fyCalc['annual_base'], 2) ?> <small><?= e($item['currency']) ?> / yr</small></div>
                                 <div class="small text-primary fw-semibold">
                                     <i class="fa-solid fa-calendar-check me-1"></i>FY<?= $selectedFy ?> Custom Schedule
@@ -222,15 +226,23 @@ $currentUserId = $_SESSION['user_id'] ?? 0;
 
                         <div class="col-md-4">
                             <div class="small text-muted">Monthly Avg w/ Tax (CAD)</div>
-                            <div class="fs-5 fw-bold text-primary">$<?= number_format($monthlyCad, 2) ?> CAD</div>
-                            <?php if ($fyCalc['has_custom_schedule']): ?>
-                                <div class="small text-muted">(Calculated from FY<?= $selectedFy ?> schedule)</div>
+                            <?php if ($hideItemCosts): ?>
+                                <div><span class="badge bg-secondary-subtle text-secondary border fs-6"><i class="fa-solid fa-eye-slash me-1"></i>Hidden</span></div>
+                            <?php else: ?>
+                                <div class="fs-5 fw-bold text-primary">$<?= number_format($monthlyCad, 2) ?> CAD</div>
+                                <?php if ($fyCalc['has_custom_schedule']): ?>
+                                    <div class="small text-muted">(Calculated from FY<?= $selectedFy ?> schedule)</div>
+                                <?php endif; ?>
                             <?php endif; ?>
                         </div>
 
                         <div class="col-md-4">
                             <div class="small text-muted">FY<?= $selectedFy ?> Annual Total w/ Tax (CAD)</div>
-                            <div class="fs-5 fw-bold text-success">$<?= number_format($annualCad, 2) ?> CAD</div>
+                            <?php if ($hideItemCosts): ?>
+                                <div><span class="badge bg-secondary-subtle text-secondary border fs-6"><i class="fa-solid fa-eye-slash me-1"></i>Hidden</span></div>
+                            <?php else: ?>
+                                <div class="fs-5 fw-bold text-success">$<?= number_format($annualCad, 2) ?> CAD</div>
+                            <?php endif; ?>
                         </div>
 
                         <div class="col-md-4">
@@ -238,9 +250,13 @@ $currentUserId = $_SESSION['user_id'] ?? 0;
                             <div class="fs-6 fw-semibold text-dark mb-1">
                                 <span class="badge bg-info-subtle text-info-emphasis me-1"><?= e($item['tax_type']) ?></span>
                             </div>
-                            <div class="small text-muted">
-                                GST: $<?= number_format($fyCalc['annual_gst'], 2) ?>/yr | PST: $<?= number_format($fyCalc['annual_pst'], 2) ?>/yr
-                            </div>
+                            <?php if ($hideItemCosts): ?>
+                                <div class="small text-muted">Taxes Hidden</div>
+                            <?php else: ?>
+                                <div class="small text-muted">
+                                    GST: $<?= number_format($fyCalc['annual_gst'], 2) ?>/yr | PST: $<?= number_format($fyCalc['annual_pst'], 2) ?>/yr
+                                </div>
+                            <?php endif; ?>
                         </div>
 
                         <div class="col-md-4">
@@ -301,7 +317,7 @@ $currentUserId = $_SESSION['user_id'] ?? 0;
             <div class="card border-0 shadow-sm h-100">
                 <div class="card-header bg-white py-3 d-flex justify-content-between align-items-center">
                     <h5 class="fw-bold mb-0 text-dark"><i class="fa-solid fa-file-contract me-2 text-primary"></i>Contract Copies</h5>
-                    <?php if (has_permission('budsheets_edit') && !$isFyLocked): ?>
+                    <?php if (has_permission('budsheets_edit') && !$isFyLocked && $canEditLob): ?>
                         <button type="button" class="btn btn-sm btn-outline-primary" data-bs-toggle="modal" data-bs-target="#uploadContractModal">
                             <i class="fa-solid fa-upload"></i>
                         </button>
@@ -326,7 +342,7 @@ $currentUserId = $_SESSION['user_id'] ?? 0;
                                             <a href="<?= url_for('budsheets_download_file') ?>&file_type=contract&file_id=<?= (int)$c['id'] ?>&disposition=attachment" class="btn btn-sm btn-outline-secondary me-1" title="Download File">
                                                 <i class="fa-solid fa-download"></i>
                                             </a>
-                                            <?php if (has_permission('budsheets_edit') && !$isFyLocked): ?>
+                                            <?php if (has_permission('budsheets_edit') && !$isFyLocked && $canEditLob): ?>
                                                 <form method="POST" class="d-inline" onsubmit="return confirm('Remove this contract document?');">
                                                     <?php if (function_exists('csrf_field')) echo csrf_field(); ?>
                                                     <input type="hidden" name="action" value="delete_contract_file">
@@ -358,7 +374,7 @@ $currentUserId = $_SESSION['user_id'] ?? 0;
                 </h5>
                 <span class="small text-muted">Customize variable pre-tax monthly dollar amounts for this specific fiscal year</span>
             </div>
-            <?php if (has_permission('budsheets_edit') && !$isFyLocked): ?>
+            <?php if (has_permission('budsheets_edit') && !$isFyLocked && $canEditLob): ?>
                 <button type="button" class="btn btn-sm btn-outline-primary" data-bs-toggle="modal" data-bs-target="#monthlyScheduleModal">
                     <i class="fa-solid fa-pen-to-square me-1"></i> Edit FY<?= $selectedFy ?> Schedule
                 </button>
@@ -376,9 +392,13 @@ $currentUserId = $_SESSION['user_id'] ?? 0;
                     <div class="col-6 col-sm-4 col-md-2 mb-2">
                         <div class="p-2 border rounded bg-light">
                             <div class="fw-bold text-secondary small"><?= $monthsNames[$mNum] ?></div>
-                            <div class="fs-6 fw-bold text-dark">$<?= number_format($mAmount, 2) ?> <small class="text-muted"><?= e($item['currency']) ?></small></div>
-                            <div class="small text-muted">(Pre-Tax)</div>
-                            <div class="small text-success fw-semibold">$<?= number_format($mCadTotal, 2) ?> CAD <small class="text-muted">(w/ Tax)</small></div>
+                            <?php if ($hideItemCosts): ?>
+                                <div class="py-2"><span class="badge bg-secondary-subtle text-secondary border"><i class="fa-solid fa-eye-slash me-1"></i>Hidden</span></div>
+                            <?php else: ?>
+                                <div class="fs-6 fw-bold text-dark">$<?= number_format($mAmount, 2) ?> <small class="text-muted"><?= e($item['currency']) ?></small></div>
+                                <div class="small text-muted">(Pre-Tax)</div>
+                                <div class="small text-success fw-semibold">$<?= number_format($mCadTotal, 2) ?> CAD <small class="text-muted">(w/ Tax)</small></div>
+                            <?php endif; ?>
                         </div>
                     </div>
                 <?php endforeach; ?>
@@ -391,9 +411,9 @@ $currentUserId = $_SESSION['user_id'] ?? 0;
         <div class="card-header bg-white py-3 d-flex justify-content-between align-items-center">
             <div>
                 <h5 class="fw-bold mb-0 text-dark"><i class="fa-solid fa-receipt me-2 text-primary"></i>Invoices Paid Against Item</h5>
-                <span class="small text-muted">Total Invoiced: <strong>$<?= number_format($totalInvoicedCad, 2) ?> CAD</strong></span>
+                <span class="small text-muted">Total Invoiced: <strong><?= $hideItemCosts ? '<span class="badge bg-secondary-subtle text-secondary border">Hidden</span>' : '$' . number_format($totalInvoicedCad, 2) . ' CAD' ?></strong></span>
             </div>
-            <?php if (has_permission('budsheets_edit')): ?>
+            <?php if (has_permission('budsheets_edit') && $canEditLob): ?>
                 <button type="button" class="btn btn-primary btn-sm" data-bs-toggle="modal" data-bs-target="#addInvoiceModal">
                     <i class="fa-solid fa-plus me-1"></i> Record Invoice
                 </button>
@@ -436,8 +456,20 @@ $currentUserId = $_SESSION['user_id'] ?? 0;
                                         </span>
                                     </td>
                                     <td class="small text-muted"><?= e($inv['payment_date'] ?: 'N/A') ?></td>
-                                    <td class="fw-semibold text-secondary">$<?= number_format((float)$inv['amount_paid'], 2) ?> <small><?= e($inv['currency']) ?></small></td>
-                                    <td class="fw-bold text-success">$<?= number_format($invCad, 2) ?> CAD</td>
+                                    <td>
+                                        <?php if ($hideItemCosts): ?>
+                                            <span class="badge bg-secondary-subtle text-secondary border"><i class="fa-solid fa-eye-slash me-1"></i>Hidden</span>
+                                        <?php else: ?>
+                                            <span class="fw-semibold text-secondary">$<?= number_format((float)$inv['amount_paid'], 2) ?> <small><?= e($inv['currency']) ?></small></span>
+                                        <?php endif; ?>
+                                    </td>
+                                    <td>
+                                        <?php if ($hideItemCosts): ?>
+                                            <span class="badge bg-secondary-subtle text-secondary border"><i class="fa-solid fa-eye-slash me-1"></i>Hidden</span>
+                                        <?php else: ?>
+                                            <span class="fw-bold text-success">$<?= number_format($invCad, 2) ?> CAD</span>
+                                        <?php endif; ?>
+                                    </td>
                                     <td>
                                         <?php if ($inv['attachment_original_name']): ?>
                                             <span class="small text-dark fw-semibold"><i class="fa-solid fa-paperclip me-1 text-muted"></i><?= e($inv['attachment_original_name']) ?></span>
@@ -455,7 +487,7 @@ $currentUserId = $_SESSION['user_id'] ?? 0;
                                                 <i class="fa-solid fa-download"></i>
                                             </a>
                                         <?php endif; ?>
-                                        <?php if (has_permission('budsheets_edit')): ?>
+                                        <?php if (has_permission('budsheets_edit') && $canEditLob): ?>
                                             <button type="button" class="btn btn-sm btn-outline-secondary me-1" data-bs-toggle="modal" data-bs-target="#editInvoiceModal<?= (int)$inv['id'] ?>" title="Edit Invoice Record">
                                                 <i class="fa-solid fa-pen-to-square"></i>
                                             </button>

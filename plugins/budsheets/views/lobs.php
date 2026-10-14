@@ -28,37 +28,37 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     $action = $_POST['action'] ?? '';
 
-    if ($action === 'create_lob') {
+    if ($action === 'create_lob' || $action === 'update_lob') {
         $name = trim($_POST['name'] ?? '');
         $code = trim($_POST['code'] ?? '');
         $description = trim($_POST['description'] ?? '');
         $fiscal_year = (int)($_POST['fiscal_year'] ?? $currentFy);
-        $assigned_users = $_POST['assigned_users'] ?? [];
+        $assigned_user_ids = $_POST['assigned_user_ids'] ?? [];
+        $user_access_levels = $_POST['user_access_levels'] ?? [];
+
+        $user_assignments = [];
+        foreach ($assigned_user_ids as $uid) {
+            $uid = (int)$uid;
+            $level = $user_access_levels[$uid] ?? 'full';
+            $user_assignments[$uid] = $level;
+        }
 
         if (empty($name)) {
             $error = 'Budget name is required.';
         } else {
-            if (budsheets_add_lob($name, $code, $description, $assigned_users, $fiscal_year)) {
-                $message = 'Budget created successfully.';
+            if ($action === 'create_lob') {
+                if (budsheets_add_lob($name, $code, $description, $user_assignments, $fiscal_year)) {
+                    $message = 'Budget created successfully.';
+                } else {
+                    $error = 'Failed to create Budget.';
+                }
             } else {
-                $error = 'Failed to create Budget.';
-            }
-        }
-    } elseif ($action === 'update_lob') {
-        $lob_id = (int)($_POST['lob_id'] ?? 0);
-        $name = trim($_POST['name'] ?? '');
-        $code = trim($_POST['code'] ?? '');
-        $description = trim($_POST['description'] ?? '');
-        $fiscal_year = (int)($_POST['fiscal_year'] ?? $currentFy);
-        $assigned_users = $_POST['assigned_users'] ?? [];
-
-        if (!$lob_id || empty($name)) {
-            $error = 'Invalid input for updating Budget.';
-        } else {
-            if (budsheets_update_lob($lob_id, $name, $code, $description, $assigned_users, $fiscal_year)) {
-                $message = 'Budget updated successfully.';
-            } else {
-                $error = 'Failed to update Budget.';
+                $lob_id = (int)($_POST['lob_id'] ?? 0);
+                if (budsheets_update_lob($lob_id, $name, $code, $description, $user_assignments, $fiscal_year)) {
+                    $message = 'Budget updated successfully.';
+                } else {
+                    $error = 'Failed to update Budget.';
+                }
             }
         }
     } elseif ($action === 'clone_lob') {
@@ -178,7 +178,7 @@ $lobs = budsheets_get_lobs(null, $selectedFy);
                             </tr>
                         <?php else: ?>
                             <?php foreach ($lobs as $lob):
-                                $assignedUids = budsheets_get_lob_users($lob['id']);
+                                $assignedUserAssignments = budsheets_get_lob_user_assignments($lob['id']);
                                 $lobFy = !empty($lob['fiscal_year']) ? (int)$lob['fiscal_year'] : $currentFy;
                                 $budgetComments = budsheets_get_comments('budget', $lob['id']);
                             ?>
@@ -189,11 +189,11 @@ $lobs = budsheets_get_lobs(null, $selectedFy);
                                     <td><span class="badge bg-primary-subtle text-primary border border-primary-subtle">FY<?= $lobFy ?></span></td>
                                     <td class="text-muted small"><?= e($lob['description'] ?: '—') ?></td>
                                     <td>
-                                        <?php if (empty($assignedUids)): ?>
+                                        <?php if (empty($assignedUserAssignments)): ?>
                                             <span class="badge bg-light text-muted border">All Admins / Open</span>
                                         <?php else: ?>
                                             <span class="badge bg-info-subtle text-info border border-info-subtle">
-                                                <i class="fa-solid fa-users me-1"></i><?= count($assignedUids) ?> Assigned User(s)
+                                                <i class="fa-solid fa-users me-1"></i><?= count($assignedUserAssignments) ?> Assigned User(s)
                                             </span>
                                         <?php endif; ?>
                                     </td>
@@ -318,18 +318,32 @@ $lobs = budsheets_get_lobs(null, $selectedFy);
                                                     </div>
                                                     <?php if (!empty($systemUsers)): ?>
                                                         <div class="mb-3">
-                                                            <label class="form-label fw-semibold">Restrict Access to Specific Users</label>
-                                                            <div class="border rounded p-2" style="max-height: 150px; overflow-y: auto;">
-                                                                <?php foreach ($systemUsers as $u): ?>
-                                                                    <div class="form-check">
-                                                                        <input class="form-check-input" type="checkbox" name="assigned_users[]" value="<?= (int)$u['id'] ?>" id="edit_u_<?= (int)$lob['id'] ?>_<?= (int)$u['id'] ?>" <?= in_array($u['id'], $assignedUids) ? 'checked' : '' ?>>
-                                                                        <label class="form-check-label small" for="edit_u_<?= (int)$lob['id'] ?>_<?= (int)$u['id'] ?>">
-                                                                            <?= e($u['name']) ?> (<?= e($u['email']) ?>)
-                                                                        </label>
+                                                            <label class="form-label fw-semibold">User Access Assignments & Permissions</label>
+                                                            <div class="border rounded p-2" style="max-height: 200px; overflow-y: auto;">
+                                                                <?php foreach ($systemUsers as $u):
+                                                                    $isAssigned = isset($assignedUserAssignments[$u['id']]);
+                                                                    $currLevel = $assignedUserAssignments[$u['id']] ?? 'full';
+                                                                ?>
+                                                                    <div class="row align-items-center mb-2 pb-1 border-bottom">
+                                                                        <div class="col-6">
+                                                                            <div class="form-check mb-0">
+                                                                                <input class="form-check-input" type="checkbox" name="assigned_user_ids[]" value="<?= (int)$u['id'] ?>" id="edit_u_check_<?= (int)$lob['id'] ?>_<?= (int)$u['id'] ?>" <?= $isAssigned ? 'checked' : '' ?>>
+                                                                                <label class="form-check-label small fw-semibold text-truncate d-block" for="edit_u_check_<?= (int)$lob['id'] ?>_<?= (int)$u['id'] ?>" title="<?= e($u['name']) ?>">
+                                                                                    <?= e($u['name']) ?>
+                                                                                </label>
+                                                                            </div>
+                                                                        </div>
+                                                                        <div class="col-6">
+                                                                            <select name="user_access_levels[<?= (int)$u['id'] ?>]" class="form-select form-select-sm">
+                                                                                <option value="full" <?= $currLevel === 'full' ? 'selected' : '' ?>>Full Access</option>
+                                                                                <option value="read_only" <?= $currLevel === 'read_only' ? 'selected' : '' ?>>Read-Only</option>
+                                                                                <option value="hide_costs" <?= $currLevel === 'hide_costs' ? 'selected' : '' ?>>Read-Only (Hide Costs)</option>
+                                                                            </select>
+                                                                        </div>
                                                                     </div>
                                                                 <?php endforeach; ?>
                                                             </div>
-                                                            <div class="form-text">Select users who are authorized to view and access this Budget.</div>
+                                                            <div class="form-text">Configure authorized users and their access permission level for this Budget.</div>
                                                         </div>
                                                     <?php endif; ?>
                                                 </div>
@@ -450,18 +464,29 @@ $lobs = budsheets_get_lobs(null, $selectedFy);
                     </div>
                     <?php if (!empty($systemUsers)): ?>
                         <div class="mb-3">
-                            <label class="form-label fw-semibold">Restrict Access to Specific Users</label>
-                            <div class="border rounded p-2" style="max-height: 150px; overflow-y: auto;">
+                            <label class="form-label fw-semibold">User Access Assignments & Permissions</label>
+                            <div class="border rounded p-2" style="max-height: 200px; overflow-y: auto;">
                                 <?php foreach ($systemUsers as $u): ?>
-                                    <div class="form-check">
-                                        <input class="form-check-input" type="checkbox" name="assigned_users[]" value="<?= (int)$u['id'] ?>" id="add_u_<?= (int)$u['id'] ?>">
-                                        <label class="form-check-label small" for="add_u_<?= (int)$u['id'] ?>">
-                                            <?= e($u['name']) ?> (<?= e($u['email']) ?>)
-                                        </label>
+                                    <div class="row align-items-center mb-2 pb-1 border-bottom">
+                                        <div class="col-6">
+                                            <div class="form-check mb-0">
+                                                <input class="form-check-input" type="checkbox" name="assigned_user_ids[]" value="<?= (int)$u['id'] ?>" id="add_u_check_<?= (int)$u['id'] ?>">
+                                                <label class="form-check-label small fw-semibold text-truncate d-block" for="add_u_check_<?= (int)$u['id'] ?>" title="<?= e($u['name']) ?>">
+                                                    <?= e($u['name']) ?>
+                                                </label>
+                                            </div>
+                                        </div>
+                                        <div class="col-6">
+                                            <select name="user_access_levels[<?= (int)$u['id'] ?>]" class="form-select form-select-sm">
+                                                <option value="full" selected>Full Access</option>
+                                                <option value="read_only">Read-Only</option>
+                                                <option value="hide_costs">Read-Only (Hide Costs)</option>
+                                            </select>
+                                        </div>
                                     </div>
                                 <?php endforeach; ?>
                             </div>
-                            <div class="form-text">Select users who are authorized to view and access this Budget.</div>
+                            <div class="form-text">Configure authorized users and their access permission level for this Budget.</div>
                         </div>
                     <?php endif; ?>
                 </div>

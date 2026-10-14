@@ -72,6 +72,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 $editItem = null;
 if ($action === 'edit' && !empty($_GET['id'])) {
     $editItem = budsheets_get_item((int)$_GET['id']);
+    if ($editItem && !budsheets_user_can_edit_lob($editItem['lob_id'])) {
+        die('Access Denied: Read-only access for this Budget.');
+    }
 }
 
 $items = budsheets_get_items($filterLob, $selectedFy);
@@ -468,6 +471,8 @@ $monthsNames = [
                             <?php else: ?>
                                 <?php foreach ($items as $item):
                                     $itemFy = !empty($item['lob_fiscal_year']) ? (int)$item['lob_fiscal_year'] : ($selectedFy ?? $currentFy);
+                                    $canEditItem = budsheets_user_can_edit_lob($item['lob_id']);
+                                    $hideItemCosts = budsheets_user_should_hide_costs($item['lob_id']);
                                     $costCalc = budsheets_calculate_item_fy_cost($item, $itemFy);
                                     $monthlyCad = budsheets_convert_to_cad($costCalc['monthly_total'], $item['currency'], $itemFy);
                                     $annualCad = budsheets_convert_to_cad($costCalc['annual_total'], $item['currency'], $itemFy);
@@ -482,15 +487,29 @@ $monthsNames = [
                                             <div class="small text-muted"><?= e($item['product']) ?></div>
                                         </td>
                                         <td><span class="badge bg-light text-dark border"><?= e($item['class'] ?: 'N/A') ?></span></td>
-                                        <td class="fw-semibold text-secondary">
-                                            $<?= number_format((float)$item['monthly_cost'], 2) ?> <small><?= e($item['currency']) ?></small>
-                                            <div class="small text-muted">(<?= ucfirst(e($item['billing_frequency'] ?? 'monthly')) ?>)</div>
+                                        <td>
+                                            <?php if ($hideItemCosts): ?>
+                                                <span class="badge bg-secondary-subtle text-secondary border"><i class="fa-solid fa-eye-slash me-1"></i>Hidden</span>
+                                            <?php else: ?>
+                                                <div class="fw-semibold text-secondary">
+                                                    $<?= number_format((float)$item['monthly_cost'], 2) ?> <small><?= e($item['currency']) ?></small>
+                                                </div>
+                                                <div class="small text-muted">(<?= ucfirst(e($item['billing_frequency'] ?? 'monthly')) ?>)</div>
+                                            <?php endif; ?>
                                         </td>
-                                        <td class="fw-bold text-primary">
-                                            $<?= number_format($monthlyCad, 2) ?> CAD
+                                        <td>
+                                            <?php if ($hideItemCosts): ?>
+                                                <span class="badge bg-secondary-subtle text-secondary border"><i class="fa-solid fa-eye-slash me-1"></i>Hidden</span>
+                                            <?php else: ?>
+                                                <div class="fw-bold text-primary">$<?= number_format($monthlyCad, 2) ?> CAD</div>
+                                            <?php endif; ?>
                                         </td>
-                                        <td class="fw-bold text-success">
-                                            $<?= number_format($annualCad, 2) ?> CAD
+                                        <td>
+                                            <?php if ($hideItemCosts): ?>
+                                                <span class="badge bg-secondary-subtle text-secondary border"><i class="fa-solid fa-eye-slash me-1"></i>Hidden</span>
+                                            <?php else: ?>
+                                                <div class="fw-bold text-success">$<?= number_format($annualCad, 2) ?> CAD</div>
+                                            <?php endif; ?>
                                         </td>
                                         <td><span class="badge bg-info-subtle text-info-emphasis"><?= e($item['tax_type']) ?></span></td>
                                         <td>
@@ -509,7 +528,7 @@ $monthsNames = [
                                             <a href="<?= url_for('budsheets_item_detail') ?>&id=<?= (int)$item['id'] ?>" class="btn btn-sm btn-outline-info me-1" title="View Details & Invoices">
                                                 <i class="fa-solid fa-eye"></i>
                                             </a>
-                                            <?php if (has_permission('budsheets_edit')): ?>
+                                            <?php if (has_permission('budsheets_edit') && $canEditItem): ?>
                                                 <a href="<?= url_for('budsheets_items') ?>&action=edit&id=<?= (int)$item['id'] ?>" class="btn btn-sm btn-outline-secondary me-1">
                                                     <i class="fa-solid fa-pen-to-square"></i>
                                                 </a>

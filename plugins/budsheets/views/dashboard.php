@@ -18,6 +18,17 @@ $managedFys = budsheets_get_managed_fiscal_years();
 $lobs = budsheets_get_lobs(null, $selectedFy);
 $items = budsheets_get_items(null, $selectedFy);
 $summary = budsheets_get_dashboard_summary($selectedFy);
+
+$userHasAnyCostAccess = true;
+if (!has_permission('budsheets_admin') && !empty($lobs)) {
+    $userHasAnyCostAccess = false;
+    foreach ($lobs as $l) {
+        if (!budsheets_user_should_hide_costs($l['id'])) {
+            $userHasAnyCostAccess = true;
+            break;
+        }
+    }
+}
 ?>
 
 <div class="container-fluid py-4">
@@ -109,7 +120,13 @@ $summary = budsheets_get_dashboard_summary($selectedFy);
                         </div>
                         <div>
                             <div class="text-muted small fw-semibold text-uppercase">Monthly Total w/ Tax (CAD)</div>
-                            <div class="fs-3 fw-bold text-dark">$<?= number_format((float)$summary['monthly_cost_cad'], 2) ?></div>
+                            <div class="fs-3 fw-bold text-dark">
+                                <?php if ($userHasAnyCostAccess): ?>
+                                    $<?= number_format((float)$summary['monthly_cost_cad'], 2) ?>
+                                <?php else: ?>
+                                    <span class="text-muted fs-5"><i class="fa-solid fa-eye-slash me-1"></i>Hidden</span>
+                                <?php endif; ?>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -125,7 +142,13 @@ $summary = budsheets_get_dashboard_summary($selectedFy);
                         </div>
                         <div>
                             <div class="text-muted small fw-semibold text-uppercase">Total Invoiced (CAD)</div>
-                            <div class="fs-3 fw-bold text-success">$<?= number_format((float)$summary['total_invoiced_cad'], 2) ?></div>
+                            <div class="fs-3 fw-bold text-success">
+                                <?php if ($userHasAnyCostAccess): ?>
+                                    $<?= number_format((float)$summary['total_invoiced_cad'], 2) ?>
+                                <?php else: ?>
+                                    <span class="text-muted fs-5"><i class="fa-solid fa-eye-slash me-1"></i>Hidden</span>
+                                <?php endif; ?>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -163,14 +186,17 @@ $summary = budsheets_get_dashboard_summary($selectedFy);
                             <?php foreach ($lobs as $lob):
                                 $lobItems = array_filter($items, function($i) use ($lob) { return $i['lob_id'] == $lob['id']; });
                                 $lobFy = !empty($lob['fiscal_year']) ? (int)$lob['fiscal_year'] : $selectedFy;
+                                $hideLobCosts = budsheets_user_should_hide_costs($lob['id']);
                                 $lobMonthlyBaseCad = 0.0;
                                 $lobMonthlyTotalCad = 0.0;
                                 $lobAnnualTotalCad = 0.0;
-                                foreach ($lobItems as $li) {
-                                    $fyCalc = budsheets_calculate_item_fy_cost($li, $lobFy);
-                                    $lobMonthlyBaseCad += budsheets_convert_to_cad($fyCalc['monthly_base'], $li['currency'], $lobFy);
-                                    $lobMonthlyTotalCad += budsheets_convert_to_cad($fyCalc['monthly_total'], $li['currency'], $lobFy);
-                                    $lobAnnualTotalCad += budsheets_convert_to_cad($fyCalc['annual_total'], $li['currency'], $lobFy);
+                                if (!$hideLobCosts) {
+                                    foreach ($lobItems as $li) {
+                                        $fyCalc = budsheets_calculate_item_fy_cost($li, $lobFy);
+                                        $lobMonthlyBaseCad += budsheets_convert_to_cad($fyCalc['monthly_base'], $li['currency'], $lobFy);
+                                        $lobMonthlyTotalCad += budsheets_convert_to_cad($fyCalc['monthly_total'], $li['currency'], $lobFy);
+                                        $lobAnnualTotalCad += budsheets_convert_to_cad($fyCalc['annual_total'], $li['currency'], $lobFy);
+                                    }
                                 }
                             ?>
                                 <tr>
@@ -178,9 +204,13 @@ $summary = budsheets_get_dashboard_summary($selectedFy);
                                     <td><span class="badge bg-secondary"><?= e($lob['code'] ?: 'N/A') ?></span></td>
                                     <td><span class="badge bg-primary-subtle text-primary border border-primary-subtle">FY<?= $lobFy ?></span></td>
                                     <td class="text-center fw-bold"><?= count($lobItems) ?></td>
-                                    <td class="fw-semibold">$<?= number_format($lobMonthlyBaseCad, 2) ?> CAD</td>
-                                    <td class="fw-bold text-primary">$<?= number_format($lobMonthlyTotalCad, 2) ?> CAD</td>
-                                    <td class="text-success fw-bold">$<?= number_format($lobAnnualTotalCad, 2) ?> CAD</td>
+                                    <?php if ($hideLobCosts): ?>
+                                        <td colspan="3" class="text-muted"><span class="badge bg-secondary-subtle text-secondary border"><i class="fa-solid fa-eye-slash me-1"></i>Costs Hidden</span></td>
+                                    <?php else: ?>
+                                        <td class="fw-semibold">$<?= number_format($lobMonthlyBaseCad, 2) ?> CAD</td>
+                                        <td class="fw-bold text-primary">$<?= number_format($lobMonthlyTotalCad, 2) ?> CAD</td>
+                                        <td class="text-success fw-bold">$<?= number_format($lobAnnualTotalCad, 2) ?> CAD</td>
+                                    <?php endif; ?>
                                     <td class="text-end pe-3">
                                         <a href="<?= url_for('budsheets_items') ?>&fy=<?= $selectedFy ?>&lob_id=<?= (int)$lob['id'] ?>" class="btn btn-sm btn-outline-primary">
                                             <i class="fa-solid fa-eye me-1"></i> View Items
