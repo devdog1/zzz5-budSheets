@@ -790,7 +790,7 @@ function budsheets_get_lobs($user_id = null, $fiscal_year = null) {
 
     if (!has_permission('budsheets_admin')) {
         $currentUserId = ($user_id !== null) ? $user_id : ($_SESSION['user_id'] ?? 0);
-        $where[] = "(l.id IN (SELECT lob_id FROM {$userLobTable} WHERE user_id = ?) OR l.id NOT IN (SELECT DISTINCT lob_id FROM {$userLobTable}))";
+        $where[] = "l.id IN (SELECT lob_id FROM {$userLobTable} WHERE user_id = ?)";
         $params[] = (int)$currentUserId;
     }
 
@@ -817,10 +817,8 @@ function budsheets_user_has_lob_access($lob_id, $user_id = null) {
     if (!$pdb) return false;
     $userLobTable = $pdb->getTableName('lob_users');
 
-    $sql = "SELECT 1 FROM {$userLobTable} WHERE lob_id = ? AND user_id = ?
-            UNION
-            SELECT 1 WHERE NOT EXISTS (SELECT 1 FROM {$userLobTable} WHERE lob_id = ?)";
-    $row = $pdb->query($sql, [(int)$lob_id, (int)$currentUserId, (int)$lob_id])->fetch();
+    $sql = "SELECT 1 FROM {$userLobTable} WHERE lob_id = ? AND user_id = ?";
+    $row = $pdb->query($sql, [(int)$lob_id, (int)$currentUserId])->fetch();
     return !empty($row);
 }
 
@@ -1018,11 +1016,6 @@ function budsheets_get_user_lob_access_level($lob_id, $user_id = null) {
     $row = $pdb->query("SELECT access_level FROM {$table} WHERE lob_id = ? AND user_id = ?", [(int)$lob_id, (int)$currentUserId])->fetch();
     if ($row && !empty($row['access_level'])) {
         return $row['access_level'];
-    }
-
-    $hasAssignments = $pdb->query("SELECT 1 FROM {$table} WHERE lob_id = ? LIMIT 1", [(int)$lob_id])->fetch();
-    if (!$hasAssignments) {
-        return 'full';
     }
 
     return 'none';
@@ -1234,7 +1227,7 @@ function budsheets_get_items($lob_id = null, $fiscal_year = null) {
 
     if (!has_permission('budsheets_admin')) {
         $currentUserId = $_SESSION['user_id'] ?? 0;
-        $where[] = "(i.lob_id IN (SELECT lob_id FROM {$userLobTable} WHERE user_id = ?) OR i.lob_id NOT IN (SELECT DISTINCT lob_id FROM {$userLobTable}))";
+        $where[] = "i.lob_id IN (SELECT lob_id FROM {$userLobTable} WHERE user_id = ?)";
         $params[] = (int)$currentUserId;
     }
 
@@ -1261,7 +1254,7 @@ function budsheets_get_item($id) {
 
     if (!has_permission('budsheets_admin')) {
         $currentUserId = $_SESSION['user_id'] ?? 0;
-        $sql .= " AND (i.lob_id IN (SELECT lob_id FROM {$userLobTable} WHERE user_id = ?) OR i.lob_id NOT IN (SELECT DISTINCT lob_id FROM {$userLobTable}))";
+        $sql .= " AND i.lob_id IN (SELECT lob_id FROM {$userLobTable} WHERE user_id = ?)";
         $params[] = (int)$currentUserId;
     }
 

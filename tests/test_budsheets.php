@@ -243,11 +243,15 @@ $itUsers = budsheets_get_lob_users(1);
 assert(count($itUsers) === 2, 'IT Budget should have 2 assigned users');
 assert(in_array(10, $itUsers) && in_array(11, $itUsers), 'User 10 and 11 assigned to IT');
 
-// Test access filtering for non-admin user
+// Test access filtering for non-admin user (Default permission: No Access)
 $user_permissions = ['budsheets_view', 'budsheets_edit']; // strip budsheets_admin
 $_SESSION['user_id'] = 12;
 $hrUserLobs = budsheets_get_lobs();
-assert(count($hrUserLobs) === 2, 'Non-admin user 12 sees assigned HR Budget and unassigned open Budgets');
+assert(count($hrUserLobs) === 1, 'Non-admin user 12 sees only explicitly assigned HR Budget');
+
+$_SESSION['user_id'] = 99; // Unassigned user
+$unassignedUserLobs = budsheets_get_lobs();
+assert(empty($unassignedUserLobs), 'Unassigned non-admin user 99 gets no access to budgets by default');
 
 // Restore admin permissions
 $user_permissions = ['budsheets_view', 'budsheets_edit', 'budsheets_admin'];

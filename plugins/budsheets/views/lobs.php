@@ -190,7 +190,7 @@ $lobs = budsheets_get_lobs(null, $selectedFy);
                                     <td class="text-muted small"><?= e($lob['description'] ?: '—') ?></td>
                                     <td>
                                         <?php if (empty($assignedUserAssignments)): ?>
-                                            <span class="badge bg-light text-muted border">All Admins / Open</span>
+                                            <span class="badge bg-light text-muted border">Admin Only (No Users Assigned)</span>
                                         <?php else: ?>
                                             <span class="badge bg-info-subtle text-info border border-info-subtle">
                                                 <i class="fa-solid fa-users me-1"></i><?= count($assignedUserAssignments) ?> Assigned User(s)
@@ -343,7 +343,7 @@ $lobs = budsheets_get_lobs(null, $selectedFy);
                                                                     </div>
                                                                 <?php endforeach; ?>
                                                             </div>
-                                                            <div class="form-text">Configure authorized users and their access permission level for this Budget.</div>
+                                                            <div class="form-text">Configure authorized users and their access permission level for this Budget (unassigned budgets are accessible to Admins only).</div>
                                                         </div>
                                                     <?php endif; ?>
                                                 </div>
