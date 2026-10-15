@@ -3,6 +3,10 @@
  * BudSheets Models & Helper functions
  */
 
+if (!defined('BUDSHEETS_VERSION')) {
+    define('BUDSHEETS_VERSION', '1.1.0');
+}
+
 if (!defined('APP_ROOT')) {
     define('APP_ROOT', __DIR__ . '/../../../');
 }

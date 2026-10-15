@@ -473,6 +473,24 @@ $managedFyList = budsheets_get_managed_fiscal_years(true);
             </div>
         </div>
     </div>
+
+    <!-- Plugin Version & Changelog Section -->
+    <?php
+    $changelogPath = __DIR__ . '/../CHANGELOG.md';
+    $changelogContent = file_exists($changelogPath) ? file_get_contents($changelogPath) : 'No CHANGELOG.md found.';
+    ?>
+    <div class="card border-0 shadow-sm mt-4 mb-4">
+        <div class="card-header bg-white py-3 d-flex justify-content-between align-items-center">
+            <h5 class="fw-bold mb-0 text-dark">
+                <i class="fa-solid fa-code-branch me-2 text-primary"></i>Plugin Version & Release Changelog
+            </h5>
+            <span class="badge bg-primary fs-6 px-3 py-2"><i class="fa-solid fa-tag me-1"></i>v<?= e(defined('BUDSHEETS_VERSION') ? BUDSHEETS_VERSION : '1.1.0') ?></span>
+        </div>
+        <div class="card-body">
+            <p class="small text-muted mb-3">Local plugin version history and recent changelog for BudSheets.</p>
+            <div class="p-3 bg-dark text-light rounded font-monospace small" style="max-height: 280px; overflow-y: auto; white-space: pre-wrap; font-size: 12px; line-height: 1.5;"><?= e($changelogContent) ?></div>
+        </div>
+    </div>
 </div>
 
 <!-- Add Financial Year Modal -->
