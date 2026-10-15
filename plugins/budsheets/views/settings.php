@@ -187,6 +187,37 @@ $managedFyList = budsheets_get_managed_fiscal_years(true);
                     </form>
                 </div>
             </div>
+
+            <!-- Weekly Email Summary Reports Box -->
+            <div class="card border-0 shadow-sm mt-4">
+                <div class="card-header bg-white py-3">
+                    <h5 class="fw-bold mb-0 text-dark"><i class="fa-solid fa-envelope me-2 text-primary"></i>Weekly Budget Email Summary Reports</h5>
+                </div>
+                <div class="card-body">
+                    <p class="small text-muted mb-3">Send or test automated HTML weekly budget summary reports for active Lines of Business and expenses.</p>
+                    <form method="POST" action="<?= url_for('budsheets_send_test_email') ?>">
+                        <?php if (function_exists('csrf_field')) echo csrf_field(); ?>
+                        <div class="mb-3">
+                            <label class="form-label fw-semibold small">Recipient Email Address (Optional Test Email)</label>
+                            <input type="email" name="target_email" class="form-control form-control-sm" placeholder="e.g. admin@domain.com (Leave blank for all users)">
+                            <div class="form-text">Leave blank to dispatch to all registered system users, or enter a specific email address for a test run.</div>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label fw-semibold small">Financial Year Summary</label>
+                            <select name="fiscal_year" class="form-select form-select-sm">
+                                <?php foreach ($managedFyList as $fyRow): ?>
+                                    <option value="<?= (int)$fyRow['year'] ?>" <?= (int)$fyRow['year'] === $currentFy ? 'selected' : '' ?>>
+                                        FY<?= (int)$fyRow['year'] ?>
+                                    </option>
+                                <?php endforeach; ?>
+                            </select>
+                        </div>
+                        <div class="text-end">
+                            <button type="submit" class="btn btn-sm btn-outline-primary"><i class="fa-solid fa-paper-plane me-1"></i> Dispatch Weekly Summary Email</button>
+                        </div>
+                    </form>
+                </div>
+            </div>
         </div>
 
         <!-- Right Side: Managed Financial Years & Expense Classes -->

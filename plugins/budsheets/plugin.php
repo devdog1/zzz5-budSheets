@@ -1,9 +1,11 @@
 <?php
 /**
  * Plugin Name: Operational Budget Sheets (BudSheets)
- * Description: Operational budget tracking plugin. Manage Budgets, expense classes, budget items, contract documents, and invoices.
+ * Plugin URI: https://github.com/devdog1/zzz5
+ * Description: Enterprise operational budget tracking plugin for zzz5 Portal Framework. Manage Budgets (Lines of Business), expense classes, budget items, contract documents, and invoices.
  * Version: 1.1.0
  * Author: DevDog
+ * Author URI: https://github.com/devdog1
  * Permissions: budsheets_view, budsheets_edit, budsheets_admin
  * Roles: admin:budsheets_view,budsheets_edit,budsheets_admin; editor:budsheets_view,budsheets_edit; viewer:budsheets_view
  */
@@ -120,6 +122,15 @@ add_action('index_dashboard_widgets', function ($userContext) {
     <?php
 });
 
+// Scheduled Weekly Cron Hooks
+add_action('plugin_cron_weekly', function() {
+    budsheets_send_weekly_summary_report();
+});
+
+add_action('budsheets_weekly_cron', function() {
+    budsheets_send_weekly_summary_report();
+});
+
 // Routes Registration
 add_action('register_routes', function() {
     register_route('budsheets_dashboard', function() {
@@ -169,5 +180,23 @@ add_action('register_routes', function() {
             die('Access Denied');
         }
         budsheets_export_items_csv();
+    });
+
+    register_route('budsheets_send_test_email', function() {
+        if (!has_permission('budsheets_admin')) {
+            die('Access Denied: Admin permissions required.');
+        }
+        if (function_exists('validate_csrf')) {
+            validate_csrf();
+        }
+        $target = trim($_POST['target_email'] ?? ($_GET['email'] ?? ''));
+        $fy = isset($_POST['fiscal_year']) ? (int)$_POST['fiscal_year'] : budsheets_get_fiscal_year();
+        $res = budsheets_send_weekly_summary_report($fy, $target);
+        if ($res) {
+            set_flash_message('success', 'Weekly budget summary report email dispatched successfully.');
+        } else {
+            set_flash_message('danger', 'Failed to dispatch weekly summary report email. Verify email addresses or mail settings.');
+        }
+        redirect(url_for('budsheets_settings'));
     });
 });

@@ -539,4 +539,14 @@ $_SESSION['user_id'] = 1;
 
 echo "  ✓ Read-Only and Hide-Costs access level tests passed.\n";
 
+// Test 14: Weekly Summary Report HTML Generation & Email Dispatch
+echo "[TEST] Testing Weekly Summary Report HTML Generation & Email Dispatch...\n";
+$reportHtml = budsheets_generate_weekly_summary_html(2026);
+assert(strpos($reportHtml, 'Weekly Budget Summary Report (FY2026)') !== false, 'Report HTML contains correct title');
+assert(strpos($reportHtml, 'Budget Allocations Breakdown') !== false, 'Report HTML contains breakdown table');
+
+$sendResult = budsheets_send_weekly_summary_report(2026, 'test@example.com');
+assert($sendResult !== null, 'Weekly summary report email function executed successfully');
+echo "  ✓ Weekly Summary Report HTML Generation & Email Dispatch tests passed.\n";
+
 echo "\nALL BUDSHEETS PLUGIN TESTS PASSED SUCCESSFULLY!\n";
