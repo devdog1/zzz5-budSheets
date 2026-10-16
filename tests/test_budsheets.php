@@ -111,6 +111,7 @@ $pdb->query("CREATE TABLE plug_budsheets_lines_of_business (
     code TEXT,
     description TEXT,
     fiscal_year INTEGER,
+    notification_emails TEXT,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );");
@@ -541,11 +542,15 @@ echo "  ✓ Read-Only and Hide-Costs access level tests passed.\n";
 
 // Test 14: Weekly Summary Report HTML Generation & Email Dispatch
 echo "[TEST] Testing Weekly Summary Report HTML Generation & Email Dispatch...\n";
+budsheets_update_lob(1, 'InfoTech 2026', 'IT-UPDATED', 'Updated description', [10], 2026, 'it-leads@domain.com, fin@domain.com');
+$itLobUpdated = budsheets_get_lob(1);
+assert($itLobUpdated['notification_emails'] === 'it-leads@domain.com, fin@domain.com', 'Budget notification emails saved successfully');
+
 $reportHtml = budsheets_generate_weekly_summary_html(2026);
 assert(strpos($reportHtml, 'Weekly Budget Summary Report (FY2026)') !== false, 'Report HTML contains correct title');
 assert(strpos($reportHtml, 'Budget Allocations Breakdown') !== false, 'Report HTML contains breakdown table');
 
-$sendResult = budsheets_send_weekly_summary_report(2026, 'test@example.com');
+$sendResult = budsheets_send_weekly_summary_report(2026);
 assert($sendResult !== null, 'Weekly summary report email function executed successfully');
 echo "  ✓ Weekly Summary Report HTML Generation & Email Dispatch tests passed.\n";
 

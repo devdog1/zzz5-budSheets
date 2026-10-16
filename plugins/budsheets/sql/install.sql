@@ -17,6 +17,7 @@ CREATE TABLE IF NOT EXISTS `plug_budsheets_lines_of_business` (
     `code` VARCHAR(50) DEFAULT NULL,
     `description` TEXT DEFAULT NULL,
     `fiscal_year` INT DEFAULT NULL,
+    `notification_emails` TEXT DEFAULT NULL,
     `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP,
     `updated_at` DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

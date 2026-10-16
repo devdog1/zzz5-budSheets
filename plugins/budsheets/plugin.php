@@ -122,8 +122,16 @@ add_action('index_dashboard_widgets', function ($userContext) {
     <?php
 });
 
-// Scheduled Weekly Cron Hooks
+// Scheduled Weekly Task Scheduler Hooks
+add_action('cron_weekly', function() {
+    budsheets_send_weekly_summary_report();
+});
+
 add_action('plugin_cron_weekly', function() {
+    budsheets_send_weekly_summary_report();
+});
+
+add_action('schedule_weekly_tasks', function() {
     budsheets_send_weekly_summary_report();
 });
 

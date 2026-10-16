@@ -67,6 +67,19 @@ function budsheets_ensure_tables_exist($pdb) {
         }
     }
 
+    // Auto-migrate notification_emails column in lines_of_business table if missing
+    try {
+        $lobTable = $pdb->getTableName('lines_of_business');
+        $pdb->query("SELECT notification_emails FROM {$lobTable} LIMIT 1");
+    } catch (Exception $e) {
+        try {
+            $lobTable = $pdb->getTableName('lines_of_business');
+            $pdb->query("ALTER TABLE {$lobTable} ADD COLUMN notification_emails TEXT DEFAULT NULL");
+        } catch (Exception $ex) {
+            // Ignore
+        }
+    }
+
     // Auto-migrate per-FY tax and FX rate columns in fiscal_years if missing
     try {
         $fyTable = $pdb->getTableName('fiscal_years');
@@ -833,7 +846,7 @@ function budsheets_get_lob($id) {
     return $pdb->query("SELECT * FROM {$table} WHERE id = ?", [(int)$id])->fetch();
 }
 
-function budsheets_add_lob($name, $code = '', $description = '', $user_ids = [], $fiscal_year = null) {
+function budsheets_add_lob($name, $code = '', $description = '', $user_ids = [], $fiscal_year = null, $notification_emails = '') {
     $pdb = budsheets_db();
     if (!$pdb) return false;
 
@@ -842,11 +855,12 @@ function budsheets_add_lob($name, $code = '', $description = '', $user_ids = [],
     }
 
     $table = $pdb->getTableName('lines_of_business');
-    $pdb->query("INSERT INTO {$table} (name, code, description, fiscal_year) VALUES (?, ?, ?, ?)", [
+    $pdb->query("INSERT INTO {$table} (name, code, description, fiscal_year, notification_emails) VALUES (?, ?, ?, ?, ?)", [
         trim($name),
         trim($code),
         trim($description),
-        (int)$fiscal_year
+        (int)$fiscal_year,
+        trim($notification_emails)
     ]);
     $lob_id = budsheets_last_insert_id($pdb);
 
@@ -856,7 +870,7 @@ function budsheets_add_lob($name, $code = '', $description = '', $user_ids = [],
     return $lob_id;
 }
 
-function budsheets_update_lob($id, $name, $code = '', $description = '', $user_ids = null, $fiscal_year = null) {
+function budsheets_update_lob($id, $name, $code = '', $description = '', $user_ids = null, $fiscal_year = null, $notification_emails = null) {
     $pdb = budsheets_db();
     if (!$pdb) return false;
 
@@ -866,13 +880,24 @@ function budsheets_update_lob($id, $name, $code = '', $description = '', $user_i
     }
 
     $table = $pdb->getTableName('lines_of_business');
-    $res = $pdb->query("UPDATE {$table} SET name = ?, code = ?, description = ?, fiscal_year = ? WHERE id = ?", [
-        trim($name),
-        trim($code),
-        trim($description),
-        (int)$fiscal_year,
-        (int)$id
-    ]);
+    if ($notification_emails !== null) {
+        $res = $pdb->query("UPDATE {$table} SET name = ?, code = ?, description = ?, fiscal_year = ?, notification_emails = ? WHERE id = ?", [
+            trim($name),
+            trim($code),
+            trim($description),
+            (int)$fiscal_year,
+            trim($notification_emails),
+            (int)$id
+        ]);
+    } else {
+        $res = $pdb->query("UPDATE {$table} SET name = ?, code = ?, description = ?, fiscal_year = ? WHERE id = ?", [
+            trim($name),
+            trim($code),
+            trim($description),
+            (int)$fiscal_year,
+            (int)$id
+        ]);
+    }
 
     if ($user_ids !== null) {
         budsheets_set_lob_users($id, $user_ids);
@@ -900,7 +925,7 @@ function budsheets_clone_budget($source_lob_id, $target_name, $target_code, $tar
     $assignedUsers = budsheets_get_lob_users($source_lob_id);
 
     // 1. Create new target Budget assigned to target_fiscal_year
-    $newLobId = budsheets_add_lob($target_name, $target_code, $sourceLob['description'], $assignedUsers, $target_fiscal_year);
+    $newLobId = budsheets_add_lob($target_name, $target_code, $sourceLob['description'], $assignedUsers, $target_fiscal_year, $sourceLob['notification_emails'] ?? '');
     if (!$newLobId) return false;
 
     // 2. Assign same expense classes to new budget
@@ -1934,6 +1959,21 @@ function budsheets_send_weekly_summary_report($fiscal_year = null, $target_email
     if (!empty($target_email) && filter_var($target_email, FILTER_VALIDATE_EMAIL)) {
         $recipients[] = trim($target_email);
     } else {
+        // Collect budget-specific notification emails
+        $lobs = budsheets_get_lobs(null, $fiscal_year);
+        foreach ($lobs as $lob) {
+            if (!empty($lob['notification_emails'])) {
+                $rawEmails = preg_split('/[\s,;\n]+/', $lob['notification_emails']);
+                foreach ($rawEmails as $e) {
+                    $e = trim($e);
+                    if (!empty($e) && filter_var($e, FILTER_VALIDATE_EMAIL)) {
+                        $recipients[] = $e;
+                    }
+                }
+            }
+        }
+
+        // Collect system user emails
         $systemUsers = budsheets_get_all_system_users();
         foreach ($systemUsers as $u) {
             if (!empty($u['email']) && filter_var($u['email'], FILTER_VALIDATE_EMAIL)) {
