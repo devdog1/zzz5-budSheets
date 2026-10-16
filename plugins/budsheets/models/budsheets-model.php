@@ -4,7 +4,7 @@
  */
 
 if (!defined('BUDSHEETS_VERSION')) {
-    define('BUDSHEETS_VERSION', '1.1.0');
+    define('BUDSHEETS_VERSION', '1.2.0');
 }
 
 if (!defined('APP_ROOT')) {

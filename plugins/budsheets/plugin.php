@@ -3,7 +3,7 @@
  * Plugin Name: Operational Budget Sheets (BudSheets)
  * Plugin URI: https://github.com/devdog1/zzz5
  * Description: Enterprise operational budget tracking plugin for zzz5 Portal Framework. Manage Budgets (Lines of Business), expense classes, budget items, contract documents, and invoices.
- * Version: 1.1.0
+ * Version: 1.2.0
  * Author: DevDog
  * Author URI: https://github.com/devdog1
  * Permissions: budsheets_view, budsheets_edit, budsheets_admin
@@ -138,6 +138,33 @@ add_action('schedule_weekly_tasks', function() {
 add_action('budsheets_weekly_cron', function() {
     budsheets_send_weekly_summary_report();
 });
+
+// Register Scheduled Tasks for Framework Task Scheduler & Overrides Page
+$budsheetsRegisterTask = function($tasks = []) {
+    if (!is_array($tasks)) {
+        $tasks = [];
+    }
+    $tasks['budsheets_weekly_summary_report'] = [
+        'id'          => 'budsheets_weekly_summary_report',
+        'key'         => 'budsheets_weekly_summary_report',
+        'name'        => 'BudSheets Weekly Budget Summary Email Report',
+        'title'       => 'BudSheets Weekly Budget Summary Email Report',
+        'description' => 'Dispatches automated weekly HTML budget summary reports to configured budget notification email recipients and system users.',
+        'plugin'      => 'budsheets',
+        'schedule'    => 'weekly',
+        'interval'    => 604800,
+        'hook'        => 'budsheets_weekly_cron',
+        'callback'    => 'budsheets_send_weekly_summary_report',
+        'enabled'     => true
+    ];
+    return $tasks;
+};
+
+add_filter('register_scheduled_tasks', $budsheetsRegisterTask);
+add_filter('task_scheduler_tasks', $budsheetsRegisterTask);
+add_filter('scheduled_tasks', $budsheetsRegisterTask);
+add_filter('plugin_scheduled_tasks', $budsheetsRegisterTask);
+add_filter('get_scheduled_tasks', $budsheetsRegisterTask);
 
 // Routes Registration
 add_action('register_routes', function() {
