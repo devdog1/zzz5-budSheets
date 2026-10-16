@@ -142,11 +142,11 @@ $managedFyList = budsheets_get_managed_fiscal_years(true);
     <?php endif; ?>
 
     <div class="row g-4 mb-4">
-        <!-- Fiscal Year, Tax Rates & Currency Conversion Box -->
+        <!-- Fiscal Year Definition Box -->
         <div class="col-lg-6">
             <div class="card border-0 shadow-sm h-100">
                 <div class="card-header bg-white py-3">
-                    <h5 class="fw-bold mb-0 text-dark"><i class="fa-solid fa-sliders me-2 text-primary"></i>Global Fiscal Year, Default Taxes & FX Rates</h5>
+                    <h5 class="fw-bold mb-0 text-dark"><i class="fa-solid fa-sliders me-2 text-primary"></i>Global Fiscal Year Configuration</h5>
                 </div>
                 <div class="card-body">
                     <form method="POST">
@@ -176,52 +176,44 @@ $managedFyList = budsheets_get_managed_fiscal_years(true);
                             <div class="col-12">
                                 <div class="p-2 bg-light rounded border text-muted small">
                                     <i class="fa-solid fa-circle-info me-1 text-info"></i> Current calculated active Fiscal Year: <strong>FY<?= $currentFy ?></strong>
-                                    <br><span class="text-secondary">(Note: Fiscal Year is named after the calendar year number that Jan 1st falls into)</span>
+                                    <br><span class="text-secondary">(Note: Fiscal Year is named after the calendar year number that Jan 1st falls into. Tax and exchange rates are configured per Financial Year in the table on the right.)</span>
                                 </div>
                             </div>
-                        </div>
-
-                        <h6 class="fw-bold text-secondary mb-3"><i class="fa-solid fa-receipt me-1"></i>Default Tax Rates (%)</h6>
-                        <div class="row g-3 mb-4">
-                            <div class="col-6">
-                                <label class="form-label fw-semibold">GST Rate (%)</label>
-                                <div class="input-group">
-                                    <input type="number" step="0.01" name="gst_rate" class="form-control" value="<?= e($settings['gst_rate']) ?>" required>
-                                    <span class="input-group-text">%</span>
-                                </div>
-                            </div>
-                            <div class="col-6">
-                                <label class="form-label fw-semibold">PST Rate (%)</label>
-                                <div class="input-group">
-                                    <input type="number" step="0.01" name="pst_rate" class="form-control" value="<?= e($settings['pst_rate']) ?>" required>
-                                    <span class="input-group-text">%</span>
-                                </div>
-                            </div>
-                        </div>
-
-                        <h6 class="fw-bold text-secondary mb-3"><i class="fa-solid fa-money-bill-transfer me-1"></i>Default Exchange Rates (1 Foreign Unit = X CAD)</h6>
-                        <div class="row g-3 mb-3">
-                            <div class="col-6">
-                                <label class="form-label fw-semibold">1 USD in CAD</label>
-                                <input type="number" step="0.0001" name="rate_USD" class="form-control" value="<?= e($settings['rate_USD']) ?>" required>
-                            </div>
-                            <div class="col-6">
-                                <label class="form-label fw-semibold">1 EUR in CAD</label>
-                                <input type="number" step="0.0001" name="rate_EUR" class="form-control" value="<?= e($settings['rate_EUR']) ?>" required>
-                            </div>
-                            <div class="col-6">
-                                <label class="form-label fw-semibold">1 GBP in CAD</label>
-                                <input type="number" step="0.0001" name="rate_GBP" class="form-control" value="<?= e($settings['rate_GBP']) ?>" required>
-                            </div>
-                            <div class="col-6">
-                                <label class="form-label fw-semibold">1 AUD in CAD</label>
-                                <input type="number" step="0.0001" name="rate_AUD" class="form-control" value="<?= e($settings['rate_AUD']) ?>" required>
-                            </div>
-                            <input type="hidden" name="rate_CAD" value="1.0">
                         </div>
 
                         <div class="text-end mt-4">
                             <button type="submit" class="btn btn-primary px-4"><i class="fa-solid fa-floppy-disk me-1"></i> Save Global Settings</button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+
+            <!-- Weekly Email Summary Reports Box -->
+            <div class="card border-0 shadow-sm mt-4">
+                <div class="card-header bg-white py-3">
+                    <h5 class="fw-bold mb-0 text-dark"><i class="fa-solid fa-envelope me-2 text-primary"></i>Weekly Budget Email Summary Reports</h5>
+                </div>
+                <div class="card-body">
+                    <p class="small text-muted mb-3">Send or test automated HTML weekly budget summary reports for active Lines of Business and expenses.</p>
+                    <form method="POST" action="<?= url_for('budsheets_send_test_email') ?>">
+                        <?php if (function_exists('csrf_field')) echo csrf_field(); ?>
+                        <div class="mb-3">
+                            <label class="form-label fw-semibold small">Recipient Email Address (Optional Test Email)</label>
+                            <input type="email" name="target_email" class="form-control form-control-sm" placeholder="e.g. admin@domain.com (Leave blank for all users)">
+                            <div class="form-text">Leave blank to dispatch to all registered system users, or enter a specific email address for a test run.</div>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label fw-semibold small">Financial Year Summary</label>
+                            <select name="fiscal_year" class="form-select form-select-sm">
+                                <?php foreach ($managedFyList as $fyRow): ?>
+                                    <option value="<?= (int)$fyRow['year'] ?>" <?= (int)$fyRow['year'] === $currentFy ? 'selected' : '' ?>>
+                                        FY<?= (int)$fyRow['year'] ?>
+                                    </option>
+                                <?php endforeach; ?>
+                            </select>
+                        </div>
+                        <div class="text-end">
+                            <button type="submit" class="btn btn-sm btn-outline-primary"><i class="fa-solid fa-paper-plane me-1"></i> Dispatch Weekly Summary Email</button>
                         </div>
                     </form>
                 </div>
@@ -479,6 +471,24 @@ $managedFyList = budsheets_get_managed_fiscal_years(true);
                     </div>
                 </div>
             </div>
+        </div>
+    </div>
+
+    <!-- Plugin Version & Changelog Section -->
+    <?php
+    $changelogPath = __DIR__ . '/../CHANGELOG.md';
+    $changelogContent = file_exists($changelogPath) ? file_get_contents($changelogPath) : 'No CHANGELOG.md found.';
+    ?>
+    <div class="card border-0 shadow-sm mt-4 mb-4">
+        <div class="card-header bg-white py-3 d-flex justify-content-between align-items-center">
+            <h5 class="fw-bold mb-0 text-dark">
+                <i class="fa-solid fa-code-branch me-2 text-primary"></i>Plugin Version & Release Changelog
+            </h5>
+            <span class="badge bg-primary fs-6 px-3 py-2"><i class="fa-solid fa-tag me-1"></i>v<?= e(defined('BUDSHEETS_VERSION') ? BUDSHEETS_VERSION : '1.1.0') ?></span>
+        </div>
+        <div class="card-body">
+            <p class="small text-muted mb-3">Local plugin version history and recent changelog for BudSheets.</p>
+            <div class="p-3 bg-dark text-light rounded font-monospace small" style="max-height: 280px; overflow-y: auto; white-space: pre-wrap; font-size: 12px; line-height: 1.5;"><?= e($changelogContent) ?></div>
         </div>
     </div>
 </div>

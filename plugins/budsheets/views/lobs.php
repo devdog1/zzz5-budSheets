@@ -16,6 +16,8 @@ $error = '';
 $systemUsers = budsheets_get_all_system_users();
 $managedFys = budsheets_get_managed_fiscal_years();
 $currentFy = budsheets_get_fiscal_year();
+$filterFyParam = $_GET['fy'] ?? null;
+$selectedFy = ($filterFyParam === 'all') ? null : (isset($filterFyParam) && $filterFyParam !== '' ? (int)$filterFyParam : $currentFy);
 $currentUserId = $_SESSION['user_id'] ?? 0;
 
 // Handle Actions
@@ -26,37 +28,37 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     $action = $_POST['action'] ?? '';
 
-    if ($action === 'create_lob') {
+    if ($action === 'create_lob' || $action === 'update_lob') {
         $name = trim($_POST['name'] ?? '');
         $code = trim($_POST['code'] ?? '');
         $description = trim($_POST['description'] ?? '');
         $fiscal_year = (int)($_POST['fiscal_year'] ?? $currentFy);
-        $assigned_users = $_POST['assigned_users'] ?? [];
+        $assigned_user_ids = $_POST['assigned_user_ids'] ?? [];
+        $user_access_levels = $_POST['user_access_levels'] ?? [];
+
+        $user_assignments = [];
+        foreach ($assigned_user_ids as $uid) {
+            $uid = (int)$uid;
+            $level = $user_access_levels[$uid] ?? 'full';
+            $user_assignments[$uid] = $level;
+        }
 
         if (empty($name)) {
             $error = 'Budget name is required.';
         } else {
-            if (budsheets_add_lob($name, $code, $description, $assigned_users, $fiscal_year)) {
-                $message = 'Budget created successfully.';
+            if ($action === 'create_lob') {
+                if (budsheets_add_lob($name, $code, $description, $user_assignments, $fiscal_year)) {
+                    $message = 'Budget created successfully.';
+                } else {
+                    $error = 'Failed to create Budget.';
+                }
             } else {
-                $error = 'Failed to create Budget.';
-            }
-        }
-    } elseif ($action === 'update_lob') {
-        $lob_id = (int)($_POST['lob_id'] ?? 0);
-        $name = trim($_POST['name'] ?? '');
-        $code = trim($_POST['code'] ?? '');
-        $description = trim($_POST['description'] ?? '');
-        $fiscal_year = (int)($_POST['fiscal_year'] ?? $currentFy);
-        $assigned_users = $_POST['assigned_users'] ?? [];
-
-        if (!$lob_id || empty($name)) {
-            $error = 'Invalid input for updating Budget.';
-        } else {
-            if (budsheets_update_lob($lob_id, $name, $code, $description, $assigned_users, $fiscal_year)) {
-                $message = 'Budget updated successfully.';
-            } else {
-                $error = 'Failed to update Budget.';
+                $lob_id = (int)($_POST['lob_id'] ?? 0);
+                if (budsheets_update_lob($lob_id, $name, $code, $description, $user_assignments, $fiscal_year)) {
+                    $message = 'Budget updated successfully.';
+                } else {
+                    $error = 'Failed to update Budget.';
+                }
             }
         }
     } elseif ($action === 'clone_lob') {
@@ -103,18 +105,41 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 }
 
-$lobs = budsheets_get_lobs();
+$lobs = budsheets_get_lobs(null, $selectedFy);
 ?>
 
 <div class="container-fluid py-4">
-    <div class="d-flex justify-content-between align-items-center mb-4">
+    <div class="d-flex justify-content-between align-items-center mb-4 flex-wrap gap-3">
         <div>
             <h2 class="fw-bold text-dark mb-1"><i class="fa-solid fa-sitemap me-2 text-primary"></i>Budgets</h2>
             <p class="text-muted small mb-0">Manage organizational budgets assigned to single financial years, clone budgets, post comments, and configure user access permissions.</p>
         </div>
-        <button type="button" class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#addLobModal">
-            <i class="fa-solid fa-plus me-1"></i> Add Budget
-        </button>
+        <div class="d-flex align-items-center flex-wrap gap-2">
+            <!-- Filter Bar for Financial Year -->
+            <form method="GET" class="d-flex align-items-center me-2">
+                <input type="hidden" name="route" value="budsheets_lobs">
+                <label for="fy_filter" class="form-label mb-0 me-2 fw-semibold text-muted small"><i class="fa-solid fa-calendar-days me-1"></i>Financial Year:</label>
+                <select name="fy" id="fy_filter" class="form-select form-select-sm fw-bold border-primary text-primary" onchange="this.form.submit()">
+                    <option value="all" <?= $filterFyParam === 'all' ? 'selected' : '' ?>>-- All Financial Years --</option>
+                    <?php
+                    $fyYears = array_column($managedFys, 'year');
+                    if (!in_array($currentFy, $fyYears)) {
+                        $fyYears[] = $currentFy;
+                    }
+                    rsort($fyYears);
+                    foreach (array_unique($fyYears) as $y):
+                    ?>
+                        <option value="<?= $y ?>" <?= ($selectedFy !== null && $y === $selectedFy) ? 'selected' : '' ?>>
+                            FY<?= $y ?><?= $y === $currentFy ? ' (Current)' : '' ?>
+                        </option>
+                    <?php endforeach; ?>
+                </select>
+            </form>
+
+            <button type="button" class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#addLobModal">
+                <i class="fa-solid fa-plus me-1"></i> Add Budget
+            </button>
+        </div>
     </div>
 
     <?php if ($message): ?>
@@ -153,7 +178,7 @@ $lobs = budsheets_get_lobs();
                             </tr>
                         <?php else: ?>
                             <?php foreach ($lobs as $lob):
-                                $assignedUids = budsheets_get_lob_users($lob['id']);
+                                $assignedUserAssignments = budsheets_get_lob_user_assignments($lob['id']);
                                 $lobFy = !empty($lob['fiscal_year']) ? (int)$lob['fiscal_year'] : $currentFy;
                                 $budgetComments = budsheets_get_comments('budget', $lob['id']);
                             ?>
@@ -164,11 +189,11 @@ $lobs = budsheets_get_lobs();
                                     <td><span class="badge bg-primary-subtle text-primary border border-primary-subtle">FY<?= $lobFy ?></span></td>
                                     <td class="text-muted small"><?= e($lob['description'] ?: '—') ?></td>
                                     <td>
-                                        <?php if (empty($assignedUids)): ?>
-                                            <span class="badge bg-light text-muted border">All Admins / Open</span>
+                                        <?php if (empty($assignedUserAssignments)): ?>
+                                            <span class="badge bg-light text-muted border">Admin Only (No Users Assigned)</span>
                                         <?php else: ?>
                                             <span class="badge bg-info-subtle text-info border border-info-subtle">
-                                                <i class="fa-solid fa-users me-1"></i><?= count($assignedUids) ?> Assigned User(s)
+                                                <i class="fa-solid fa-users me-1"></i><?= count($assignedUserAssignments) ?> Assigned User(s)
                                             </span>
                                         <?php endif; ?>
                                     </td>
@@ -293,18 +318,32 @@ $lobs = budsheets_get_lobs();
                                                     </div>
                                                     <?php if (!empty($systemUsers)): ?>
                                                         <div class="mb-3">
-                                                            <label class="form-label fw-semibold">Restrict Access to Specific Users</label>
-                                                            <div class="border rounded p-2" style="max-height: 150px; overflow-y: auto;">
-                                                                <?php foreach ($systemUsers as $u): ?>
-                                                                    <div class="form-check">
-                                                                        <input class="form-check-input" type="checkbox" name="assigned_users[]" value="<?= (int)$u['id'] ?>" id="edit_u_<?= (int)$lob['id'] ?>_<?= (int)$u['id'] ?>" <?= in_array($u['id'], $assignedUids) ? 'checked' : '' ?>>
-                                                                        <label class="form-check-label small" for="edit_u_<?= (int)$lob['id'] ?>_<?= (int)$u['id'] ?>">
-                                                                            <?= e($u['name']) ?> (<?= e($u['email']) ?>)
-                                                                        </label>
+                                                            <label class="form-label fw-semibold">User Access Assignments & Permissions</label>
+                                                            <div class="border rounded p-2" style="max-height: 200px; overflow-y: auto;">
+                                                                <?php foreach ($systemUsers as $u):
+                                                                    $isAssigned = isset($assignedUserAssignments[$u['id']]);
+                                                                    $currLevel = $assignedUserAssignments[$u['id']] ?? 'full';
+                                                                ?>
+                                                                    <div class="row align-items-center mb-2 pb-1 border-bottom">
+                                                                        <div class="col-6">
+                                                                            <div class="form-check mb-0">
+                                                                                <input class="form-check-input" type="checkbox" name="assigned_user_ids[]" value="<?= (int)$u['id'] ?>" id="edit_u_check_<?= (int)$lob['id'] ?>_<?= (int)$u['id'] ?>" <?= $isAssigned ? 'checked' : '' ?>>
+                                                                                <label class="form-check-label small fw-semibold text-truncate d-block" for="edit_u_check_<?= (int)$lob['id'] ?>_<?= (int)$u['id'] ?>" title="<?= e($u['name']) ?>">
+                                                                                    <?= e($u['name']) ?>
+                                                                                </label>
+                                                                            </div>
+                                                                        </div>
+                                                                        <div class="col-6">
+                                                                            <select name="user_access_levels[<?= (int)$u['id'] ?>]" class="form-select form-select-sm">
+                                                                                <option value="full" <?= $currLevel === 'full' ? 'selected' : '' ?>>Full Access</option>
+                                                                                <option value="read_only" <?= $currLevel === 'read_only' ? 'selected' : '' ?>>Read-Only</option>
+                                                                                <option value="hide_costs" <?= $currLevel === 'hide_costs' ? 'selected' : '' ?>>Read-Only (Hide Costs)</option>
+                                                                            </select>
+                                                                        </div>
                                                                     </div>
                                                                 <?php endforeach; ?>
                                                             </div>
-                                                            <div class="form-text">Select users who are authorized to view and access this Budget.</div>
+                                                            <div class="form-text">Configure authorized users and their access permission level for this Budget (unassigned budgets are accessible to Admins only).</div>
                                                         </div>
                                                     <?php endif; ?>
                                                 </div>
@@ -412,7 +451,7 @@ $lobs = budsheets_get_lobs();
                             <label class="form-label fw-semibold">Financial Year <span class="text-danger">*</span></label>
                             <select name="fiscal_year" class="form-select" required>
                                 <?php foreach ($managedFys as $fy): ?>
-                                    <option value="<?= (int)$fy['year'] ?>" <?= $currentFy === (int)$fy['year'] ? 'selected' : '' ?>>
+                                    <option value="<?= (int)$fy['year'] ?>" <?= ($selectedFy !== null ? $selectedFy : $currentFy) === (int)$fy['year'] ? 'selected' : '' ?>>
                                         FY<?= (int)$fy['year'] ?>
                                     </option>
                                 <?php endforeach; ?>
@@ -425,18 +464,29 @@ $lobs = budsheets_get_lobs();
                     </div>
                     <?php if (!empty($systemUsers)): ?>
                         <div class="mb-3">
-                            <label class="form-label fw-semibold">Restrict Access to Specific Users</label>
-                            <div class="border rounded p-2" style="max-height: 150px; overflow-y: auto;">
+                            <label class="form-label fw-semibold">User Access Assignments & Permissions</label>
+                            <div class="border rounded p-2" style="max-height: 200px; overflow-y: auto;">
                                 <?php foreach ($systemUsers as $u): ?>
-                                    <div class="form-check">
-                                        <input class="form-check-input" type="checkbox" name="assigned_users[]" value="<?= (int)$u['id'] ?>" id="add_u_<?= (int)$u['id'] ?>">
-                                        <label class="form-check-label small" for="add_u_<?= (int)$u['id'] ?>">
-                                            <?= e($u['name']) ?> (<?= e($u['email']) ?>)
-                                        </label>
+                                    <div class="row align-items-center mb-2 pb-1 border-bottom">
+                                        <div class="col-6">
+                                            <div class="form-check mb-0">
+                                                <input class="form-check-input" type="checkbox" name="assigned_user_ids[]" value="<?= (int)$u['id'] ?>" id="add_u_check_<?= (int)$u['id'] ?>">
+                                                <label class="form-check-label small fw-semibold text-truncate d-block" for="add_u_check_<?= (int)$u['id'] ?>" title="<?= e($u['name']) ?>">
+                                                    <?= e($u['name']) ?>
+                                                </label>
+                                            </div>
+                                        </div>
+                                        <div class="col-6">
+                                            <select name="user_access_levels[<?= (int)$u['id'] ?>]" class="form-select form-select-sm">
+                                                <option value="full" selected>Full Access</option>
+                                                <option value="read_only">Read-Only</option>
+                                                <option value="hide_costs">Read-Only (Hide Costs)</option>
+                                            </select>
+                                        </div>
                                     </div>
                                 <?php endforeach; ?>
                             </div>
-                            <div class="form-text">Select users who are authorized to view and access this Budget.</div>
+                            <div class="form-text">Configure authorized users and their access permission level for this Budget.</div>
                         </div>
                     <?php endif; ?>
                 </div>

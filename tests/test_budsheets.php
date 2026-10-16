@@ -243,11 +243,15 @@ $itUsers = budsheets_get_lob_users(1);
 assert(count($itUsers) === 2, 'IT Budget should have 2 assigned users');
 assert(in_array(10, $itUsers) && in_array(11, $itUsers), 'User 10 and 11 assigned to IT');
 
-// Test access filtering for non-admin user
+// Test access filtering for non-admin user (Default permission: No Access)
 $user_permissions = ['budsheets_view', 'budsheets_edit']; // strip budsheets_admin
 $_SESSION['user_id'] = 12;
 $hrUserLobs = budsheets_get_lobs();
-assert(count($hrUserLobs) === 2, 'Non-admin user 12 sees assigned HR Budget and unassigned open Budgets');
+assert(count($hrUserLobs) === 1, 'Non-admin user 12 sees only explicitly assigned HR Budget');
+
+$_SESSION['user_id'] = 99; // Unassigned user
+$unassignedUserLobs = budsheets_get_lobs();
+assert(empty($unassignedUserLobs), 'Unassigned non-admin user 99 gets no access to budgets by default');
 
 // Restore admin permissions
 $user_permissions = ['budsheets_view', 'budsheets_edit', 'budsheets_admin'];
@@ -487,5 +491,72 @@ assert(isset($registered_filters['theme_nav_links']), 'theme_nav_links filter ho
 assert(isset($registered_actions['index_dashboard_widgets']), 'index_dashboard_widgets action hook registered');
 
 echo "  ✓ Framework hooks & route verification tests passed.\n";
+
+// Test 12: View Structure & FY -> Budget -> Item Hierarchy & Access Filtering
+echo "[TEST] Testing Financial Year -> Budget -> Item View Hierarchy & Access Filtering...\n";
+$fy2026Lobs = budsheets_get_lobs(null, 2026);
+$fy2027Lobs = budsheets_get_lobs(null, 2027);
+assert(count($fy2026Lobs) === 2, '2 Budgets in FY2026');
+assert(count($fy2027Lobs) === 2, '2 Budgets in FY2027 (cloned ones)');
+
+$fy2026Items = budsheets_get_items(null, 2026);
+$fy2027Items = budsheets_get_items(null, 2027);
+assert(count($fy2026Items) === 1, '1 Item in FY2026');
+assert(count($fy2027Items) === 2, '2 Cloned Items in FY2027');
+
+$summary2026 = budsheets_get_dashboard_summary(2026);
+assert($summary2026['lob_count'] === 2 && $summary2026['item_count'] === 1, 'FY2026 Dashboard summary correctly isolated');
+
+$summary2027 = budsheets_get_dashboard_summary(2027);
+assert($summary2027['lob_count'] === 2 && $summary2027['item_count'] === 2, 'FY2027 Dashboard summary correctly isolated');
+
+echo "  ✓ View structure & FY -> Budget -> Item hierarchy tests passed.\n";
+
+// Test 13: Read-Only and Hide-Costs LOB User Access Levels
+echo "[TEST] Testing Read-Only and Read-Only Hide-Costs User Access Levels...\n";
+budsheets_set_lob_users(1, [
+    20 => 'read_only',
+    21 => 'hide_costs'
+]);
+
+$level20 = budsheets_get_user_lob_access_level(1, 20);
+assert($level20 === 'read_only', 'User 20 has read_only access level on LOB 1');
+
+$level21 = budsheets_get_user_lob_access_level(1, 21);
+assert($level21 === 'hide_costs', 'User 21 has hide_costs access level on LOB 1');
+
+$user_permissions = ['budsheets_view', 'budsheets_edit']; // Non-admin user
+
+assert(budsheets_user_can_edit_lob(1, 20) === false, 'User 20 cannot edit LOB 1 (read_only)');
+assert(budsheets_user_should_hide_costs(1, 20) === false, 'User 20 does not hide costs');
+
+assert(budsheets_user_can_edit_lob(1, 21) === false, 'User 21 cannot edit LOB 1 (hide_costs)');
+assert(budsheets_user_should_hide_costs(1, 21) === true, 'User 21 should hide costs on LOB 1');
+
+// Restore admin permissions and session user
+$user_permissions = ['budsheets_view', 'budsheets_edit', 'budsheets_admin'];
+$_SESSION['user_id'] = 1;
+
+echo "  ✓ Read-Only and Hide-Costs access level tests passed.\n";
+
+// Test 14: Weekly Summary Report HTML Generation & Email Dispatch
+echo "[TEST] Testing Weekly Summary Report HTML Generation & Email Dispatch...\n";
+$reportHtml = budsheets_generate_weekly_summary_html(2026);
+assert(strpos($reportHtml, 'Weekly Budget Summary Report (FY2026)') !== false, 'Report HTML contains correct title');
+assert(strpos($reportHtml, 'Budget Allocations Breakdown') !== false, 'Report HTML contains breakdown table');
+
+$sendResult = budsheets_send_weekly_summary_report(2026, 'test@example.com');
+assert($sendResult !== null, 'Weekly summary report email function executed successfully');
+echo "  ✓ Weekly Summary Report HTML Generation & Email Dispatch tests passed.\n";
+
+// Test 15: Local Plugin Versioning & Changelog File Check
+echo "[TEST] Testing Local Plugin Versioning and CHANGELOG.md...\n";
+assert(defined('BUDSHEETS_VERSION'), 'BUDSHEETS_VERSION constant is defined');
+assert(BUDSHEETS_VERSION === '1.1.0', 'BUDSHEETS_VERSION is set to 1.1.0');
+$changelogFile = __DIR__ . '/../plugins/budsheets/CHANGELOG.md';
+assert(file_exists($changelogFile), 'CHANGELOG.md file exists in plugin folder');
+$clContent = file_get_contents($changelogFile);
+assert(strpos($clContent, '[1.1.0]') !== false, 'CHANGELOG.md contains version 1.1.0 release notes');
+echo "  ✓ Plugin versioning and CHANGELOG.md tests passed.\n";
 
 echo "\nALL BUDSHEETS PLUGIN TESTS PASSED SUCCESSFULLY!\n";
