@@ -2,6 +2,14 @@
 
 All notable changes to the BudSheets plugin will be documented in this file.
 
+## [1.4.0] - 2026-03-31
+
+### Added
+- **Tasks Directory Structure**: Reorganized scheduled tasks into the plugin `/tasks/` directory following the zzz5 framework structure (`plugins/budsheets/tasks/weekly_summary_email.php`).
+- **Plugin Tasks Loader**: Added auto-loader in `plugin.php` to discover and register all task files from `plugins/budsheets/tasks/`.
+
+---
+
 ## [1.3.0] - 2026-03-31
 
 ### Added

@@ -560,11 +560,13 @@ echo "  ✓ Weekly Summary Report HTML Generation & Email Dispatch tests passed.
 // Test 15: Local Plugin Versioning & Changelog File Check
 echo "[TEST] Testing Local Plugin Versioning and CHANGELOG.md...\n";
 assert(defined('BUDSHEETS_VERSION'), 'BUDSHEETS_VERSION constant is defined');
-assert(BUDSHEETS_VERSION === '1.3.0', 'BUDSHEETS_VERSION is set to 1.3.0');
+assert(BUDSHEETS_VERSION === '1.4.0', 'BUDSHEETS_VERSION is set to 1.4.0');
 $changelogFile = __DIR__ . '/../plugins/budsheets/CHANGELOG.md';
 assert(file_exists($changelogFile), 'CHANGELOG.md file exists in plugin folder');
 $clContent = file_get_contents($changelogFile);
-assert(strpos($clContent, '[1.3.0]') !== false, 'CHANGELOG.md contains version 1.3.0 release notes');
+assert(strpos($clContent, '[1.4.0]') !== false, 'CHANGELOG.md contains version 1.4.0 release notes');
+$taskFile = __DIR__ . '/../plugins/budsheets/tasks/weekly_summary_email.php';
+assert(file_exists($taskFile), 'Task file weekly_summary_email.php exists in /tasks/ directory');
 echo "  ✓ Plugin versioning and CHANGELOG.md tests passed.\n";
 
 echo "\nALL BUDSHEETS PLUGIN TESTS PASSED SUCCESSFULLY!\n";

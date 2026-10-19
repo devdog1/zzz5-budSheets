@@ -3,7 +3,7 @@
  * Plugin Name: Operational Budget Sheets (BudSheets)
  * Plugin URI: https://github.com/devdog1/zzz5
  * Description: Enterprise operational budget tracking plugin for zzz5 Portal Framework. Manage Budgets (Lines of Business), expense classes, budget items, contract documents, and invoices.
- * Version: 1.3.0
+ * Version: 1.4.0
  * Author: DevDog
  * Author URI: https://github.com/devdog1
  * Permissions: budsheets_view, budsheets_edit, budsheets_admin
@@ -16,6 +16,14 @@ if (!defined('APP_ROOT')) {
 
 // Require Helper / Model logic
 require_once __DIR__ . '/models/budsheets-model.php';
+
+// Auto-load Task files from tasks/ directory
+$tasksDir = __DIR__ . '/tasks/';
+if (is_dir($tasksDir)) {
+    foreach (glob($tasksDir . '*.php') as $taskFile) {
+        require_once $taskFile;
+    }
+}
 
 // Plugin Activation Lifecycle Hook (Executes install.sql)
 add_action('plugin_activate_budsheets', function() {
