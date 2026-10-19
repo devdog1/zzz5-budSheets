@@ -11,21 +11,58 @@ if (!has_permission('budsheets_view')) {
     die('Access Denied');
 }
 
-$lobs = budsheets_get_lobs();
-$items = budsheets_get_items();
-$summary = budsheets_get_dashboard_summary();
 $currFy = budsheets_get_fiscal_year();
+$selectedFy = isset($_GET['fy']) && $_GET['fy'] !== '' ? (int)$_GET['fy'] : $currFy;
+$managedFys = budsheets_get_managed_fiscal_years();
+
+$lobs = budsheets_get_lobs(null, $selectedFy);
+$items = budsheets_get_items(null, $selectedFy);
+$summary = budsheets_get_dashboard_summary($selectedFy);
+
+$userHasAnyCostAccess = true;
+if (!has_permission('budsheets_admin') && !empty($lobs)) {
+    $userHasAnyCostAccess = false;
+    foreach ($lobs as $l) {
+        if (!budsheets_user_should_hide_costs($l['id'])) {
+            $userHasAnyCostAccess = true;
+            break;
+        }
+    }
+}
 ?>
 
 <div class="container-fluid py-4">
-    <div class="d-flex justify-content-between align-items-center mb-4">
+    <div class="d-flex justify-content-between align-items-center mb-4 flex-wrap gap-3">
         <div>
             <h2 class="fw-bold text-dark mb-1"><i class="fa-solid fa-calculator me-2 text-primary"></i>Operational Budgets Dashboard</h2>
-            <p class="text-muted small mb-0">Overview of organizational budgets, recurring operational expenses, and invoices in <strong>CAD</strong> (FY<?= $currFy ?>).</p>
+            <p class="text-muted small mb-0">Overview of organizational budgets, recurring operational expenses, and invoices in <strong>CAD</strong> (FY<?= $selectedFy ?>).</p>
         </div>
-        <div>
+        <div class="d-flex align-items-center flex-wrap gap-2">
+            <!-- Financial Year Selector -->
+            <form method="GET" class="d-flex align-items-center me-2">
+                <input type="hidden" name="route" value="budsheets_dashboard">
+                <label for="fy_select" class="form-label mb-0 me-2 fw-semibold text-muted small"><i class="fa-solid fa-calendar-days me-1"></i>Financial Year:</label>
+                <select name="fy" id="fy_select" class="form-select form-select-sm fw-bold border-primary text-primary" onchange="this.form.submit()">
+                    <?php
+                    $fyYears = array_column($managedFys, 'year');
+                    if (!in_array($currFy, $fyYears)) {
+                        $fyYears[] = $currFy;
+                    }
+                    if (!in_array($selectedFy, $fyYears)) {
+                        $fyYears[] = $selectedFy;
+                    }
+                    rsort($fyYears);
+                    foreach (array_unique($fyYears) as $y):
+                    ?>
+                        <option value="<?= $y ?>" <?= $y === $selectedFy ? 'selected' : '' ?>>
+                            FY<?= $y ?><?= $y === $currFy ? ' (Current)' : '' ?>
+                        </option>
+                    <?php endforeach; ?>
+                </select>
+            </form>
+
             <?php if (has_permission('budsheets_edit')): ?>
-                <a href="<?= url_for('budsheets_items') ?>&action=new" class="btn btn-primary me-2">
+                <a href="<?= url_for('budsheets_items') ?>&action=new&fy=<?= $selectedFy ?>" class="btn btn-primary me-2">
                     <i class="fa-solid fa-plus me-1"></i> Add Budget Item
                 </a>
             <?php endif; ?>
@@ -33,7 +70,7 @@ $currFy = budsheets_get_fiscal_year();
                 <a href="<?= url_for('budsheets_settings') ?>" class="btn btn-outline-secondary me-2">
                     <i class="fa-solid fa-gear me-1"></i> Settings
                 </a>
-                <a href="<?= url_for('budsheets_lobs') ?>" class="btn btn-outline-secondary">
+                <a href="<?= url_for('budsheets_lobs') ?>&fy=<?= $selectedFy ?>" class="btn btn-outline-secondary">
                     <i class="fa-solid fa-sitemap me-1"></i> Budgets
                 </a>
             <?php endif; ?>
@@ -83,7 +120,13 @@ $currFy = budsheets_get_fiscal_year();
                         </div>
                         <div>
                             <div class="text-muted small fw-semibold text-uppercase">Monthly Total w/ Tax (CAD)</div>
-                            <div class="fs-3 fw-bold text-dark">$<?= number_format((float)$summary['monthly_cost_cad'], 2) ?></div>
+                            <div class="fs-3 fw-bold text-dark">
+                                <?php if ($userHasAnyCostAccess): ?>
+                                    $<?= number_format((float)$summary['monthly_cost_cad'], 2) ?>
+                                <?php else: ?>
+                                    <span class="text-muted fs-5"><i class="fa-solid fa-eye-slash me-1"></i>Hidden</span>
+                                <?php endif; ?>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -99,7 +142,13 @@ $currFy = budsheets_get_fiscal_year();
                         </div>
                         <div>
                             <div class="text-muted small fw-semibold text-uppercase">Total Invoiced (CAD)</div>
-                            <div class="fs-3 fw-bold text-success">$<?= number_format((float)$summary['total_invoiced_cad'], 2) ?></div>
+                            <div class="fs-3 fw-bold text-success">
+                                <?php if ($userHasAnyCostAccess): ?>
+                                    $<?= number_format((float)$summary['total_invoiced_cad'], 2) ?>
+                                <?php else: ?>
+                                    <span class="text-muted fs-5"><i class="fa-solid fa-eye-slash me-1"></i>Hidden</span>
+                                <?php endif; ?>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -110,8 +159,8 @@ $currFy = budsheets_get_fiscal_year();
     <!-- Line of Business Breakdown Table -->
     <div class="card border-0 shadow-sm mb-4">
         <div class="card-header bg-white py-3 d-flex justify-content-between align-items-center">
-            <h5 class="fw-bold mb-0 text-dark"><i class="fa-solid fa-layer-group me-2 text-secondary"></i>Budget Allocations (All converted to CAD - FY<?= $currFy ?>)</h5>
-            <span class="badge bg-light text-secondary border">FY<?= $currFy ?> Active Budget Year</span>
+            <h5 class="fw-bold mb-0 text-dark"><i class="fa-solid fa-layer-group me-2 text-secondary"></i>Budget Allocations (All converted to CAD - FY<?= $selectedFy ?>)</h5>
+            <span class="badge bg-primary-subtle text-primary border border-primary-subtle fs-6">FY<?= $selectedFy ?> Selected Budget Year</span>
         </div>
         <div class="card-body p-0">
             <div class="table-responsive">
@@ -131,20 +180,23 @@ $currFy = budsheets_get_fiscal_year();
                     <tbody>
                         <?php if (empty($lobs)): ?>
                             <tr>
-                                <td colspan="8" class="text-center py-4 text-muted">No Budgets defined yet.</td>
+                                <td colspan="8" class="text-center py-4 text-muted">No Budgets defined for FY<?= $selectedFy ?>.</td>
                             </tr>
                         <?php else: ?>
                             <?php foreach ($lobs as $lob):
                                 $lobItems = array_filter($items, function($i) use ($lob) { return $i['lob_id'] == $lob['id']; });
-                                $lobFy = !empty($lob['fiscal_year']) ? (int)$lob['fiscal_year'] : $currFy;
+                                $lobFy = !empty($lob['fiscal_year']) ? (int)$lob['fiscal_year'] : $selectedFy;
+                                $hideLobCosts = budsheets_user_should_hide_costs($lob['id']);
                                 $lobMonthlyBaseCad = 0.0;
                                 $lobMonthlyTotalCad = 0.0;
                                 $lobAnnualTotalCad = 0.0;
-                                foreach ($lobItems as $li) {
-                                    $fyCalc = budsheets_calculate_item_fy_cost($li, $lobFy);
-                                    $lobMonthlyBaseCad += budsheets_convert_to_cad($fyCalc['monthly_base'], $li['currency']);
-                                    $lobMonthlyTotalCad += budsheets_convert_to_cad($fyCalc['monthly_total'], $li['currency']);
-                                    $lobAnnualTotalCad += budsheets_convert_to_cad($fyCalc['annual_total'], $li['currency']);
+                                if (!$hideLobCosts) {
+                                    foreach ($lobItems as $li) {
+                                        $fyCalc = budsheets_calculate_item_fy_cost($li, $lobFy);
+                                        $lobMonthlyBaseCad += budsheets_convert_to_cad($fyCalc['monthly_base'], $li['currency'], $lobFy);
+                                        $lobMonthlyTotalCad += budsheets_convert_to_cad($fyCalc['monthly_total'], $li['currency'], $lobFy);
+                                        $lobAnnualTotalCad += budsheets_convert_to_cad($fyCalc['annual_total'], $li['currency'], $lobFy);
+                                    }
                                 }
                             ?>
                                 <tr>
@@ -152,11 +204,15 @@ $currFy = budsheets_get_fiscal_year();
                                     <td><span class="badge bg-secondary"><?= e($lob['code'] ?: 'N/A') ?></span></td>
                                     <td><span class="badge bg-primary-subtle text-primary border border-primary-subtle">FY<?= $lobFy ?></span></td>
                                     <td class="text-center fw-bold"><?= count($lobItems) ?></td>
-                                    <td class="fw-semibold">$<?= number_format($lobMonthlyBaseCad, 2) ?> CAD</td>
-                                    <td class="fw-bold text-primary">$<?= number_format($lobMonthlyTotalCad, 2) ?> CAD</td>
-                                    <td class="text-success fw-bold">$<?= number_format($lobAnnualTotalCad, 2) ?> CAD</td>
+                                    <?php if ($hideLobCosts): ?>
+                                        <td colspan="3" class="text-muted"><span class="badge bg-secondary-subtle text-secondary border"><i class="fa-solid fa-eye-slash me-1"></i>Costs Hidden</span></td>
+                                    <?php else: ?>
+                                        <td class="fw-semibold">$<?= number_format($lobMonthlyBaseCad, 2) ?> CAD</td>
+                                        <td class="fw-bold text-primary">$<?= number_format($lobMonthlyTotalCad, 2) ?> CAD</td>
+                                        <td class="text-success fw-bold">$<?= number_format($lobAnnualTotalCad, 2) ?> CAD</td>
+                                    <?php endif; ?>
                                     <td class="text-end pe-3">
-                                        <a href="<?= url_for('budsheets_items') ?>&lob_id=<?= (int)$lob['id'] ?>" class="btn btn-sm btn-outline-primary">
+                                        <a href="<?= url_for('budsheets_items') ?>&fy=<?= $selectedFy ?>&lob_id=<?= (int)$lob['id'] ?>" class="btn btn-sm btn-outline-primary">
                                             <i class="fa-solid fa-eye me-1"></i> View Items
                                         </a>
                                     </td>

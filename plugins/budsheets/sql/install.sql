@@ -17,6 +17,7 @@ CREATE TABLE IF NOT EXISTS `plug_budsheets_lines_of_business` (
     `code` VARCHAR(50) DEFAULT NULL,
     `description` TEXT DEFAULT NULL,
     `fiscal_year` INT DEFAULT NULL,
+    `notification_emails` TEXT DEFAULT NULL,
     `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP,
     `updated_at` DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
@@ -24,6 +25,7 @@ CREATE TABLE IF NOT EXISTS `plug_budsheets_lines_of_business` (
 CREATE TABLE IF NOT EXISTS `plug_budsheets_lob_users` (
     `lob_id` INT NOT NULL,
     `user_id` INT NOT NULL,
+    `access_level` ENUM('full', 'read_only', 'hide_costs') NOT NULL DEFAULT 'full',
     PRIMARY KEY (`lob_id`, `user_id`),
     INDEX (`user_id`),
     CONSTRAINT `fk_budsheets_lob_users_lob` FOREIGN KEY (`lob_id`) REFERENCES `plug_budsheets_lines_of_business`(`id`) ON DELETE CASCADE

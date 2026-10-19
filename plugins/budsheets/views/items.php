@@ -11,11 +11,17 @@ if (!has_permission('budsheets_view')) {
     die('Access Denied');
 }
 
-$lobs = budsheets_get_lobs();
+$currentFy = budsheets_get_fiscal_year();
+$filterFyParam = $_GET['fy'] ?? null;
+$selectedFy = ($filterFyParam === 'all') ? null : (isset($filterFyParam) && $filterFyParam !== '' ? (int)$filterFyParam : $currentFy);
+$filterLob = isset($_GET['lob_id']) && $_GET['lob_id'] !== '' ? (int)$_GET['lob_id'] : null;
+
+$lobs = budsheets_get_lobs(null, $selectedFy);
+$allLobs = budsheets_get_lobs();
+$managedFys = budsheets_get_managed_fiscal_years();
 $message = '';
 $error = '';
 $action = $_POST['action'] ?? ($_GET['action'] ?? 'list');
-$filterLob = isset($_GET['lob_id']) ? (int)$_GET['lob_id'] : null;
 
 // Handle Form Submissions
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
@@ -66,9 +72,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 $editItem = null;
 if ($action === 'edit' && !empty($_GET['id'])) {
     $editItem = budsheets_get_item((int)$_GET['id']);
+    if ($editItem && !budsheets_user_can_edit_lob($editItem['lob_id'])) {
+        die('Access Denied: Read-only access for this Budget.');
+    }
 }
 
-$items = budsheets_get_items($filterLob);
+$items = budsheets_get_items($filterLob, $selectedFy);
 
 // Build map of classes per Budget
 $allClasses = budsheets_get_all_classes();
@@ -79,7 +88,7 @@ foreach ($allClasses as $c) {
             $lobClassesMap[$lid][] = $c['name'];
         }
     } else {
-        foreach ($lobs as $l) {
+        foreach ($allLobs as $l) {
             $lobClassesMap[$l['id']][] = $c['name'];
         }
     }
@@ -122,19 +131,38 @@ $monthsNames = [
                     <?php endif; ?>
 
                     <div class="row g-3">
-                        <div class="col-md-6">
+                        <div class="col-md-4">
+                            <label class="form-label fw-semibold">Financial Year <span class="text-danger">*</span></label>
+                            <select id="fy_form_select" class="form-select" onchange="filterLobsByFy()">
+                                <?php
+                                $formFy = $editItem ? (!empty($editItem['lob_fiscal_year']) ? (int)$editItem['lob_fiscal_year'] : $currentFy) : ($selectedFy ?? $currentFy);
+                                $fyYears = array_column($managedFys, 'year');
+                                if (!in_array($currentFy, $fyYears)) $fyYears[] = $currentFy;
+                                if (!in_array($formFy, $fyYears)) $fyYears[] = $formFy;
+                                rsort($fyYears);
+                                foreach (array_unique($fyYears) as $y):
+                                ?>
+                                    <option value="<?= $y ?>" <?= $y === $formFy ? 'selected' : '' ?>>
+                                        FY<?= $y ?><?= $y === $currentFy ? ' (Current)' : '' ?>
+                                    </option>
+                                <?php endforeach; ?>
+                            </select>
+                            <div class="form-text">Filters available Budgets by Financial Year.</div>
+                        </div>
+
+                        <div class="col-md-4">
                             <label class="form-label fw-semibold">Budget <span class="text-danger">*</span></label>
                             <select name="lob_id" id="lob_select" class="form-select" onchange="updateClassOptions()" required>
                                 <option value="">-- Select Budget --</option>
-                                <?php foreach ($lobs as $lob): ?>
-                                    <option value="<?= (int)$lob['id'] ?>" <?= ($editItem && $editItem['lob_id'] == $lob['id']) || ($filterLob == $lob['id']) ? 'selected' : '' ?>>
-                                        <?= e($lob['name']) ?> (<?= e($lob['code'] ?: 'No Code') ?>)
+                                <?php foreach ($allLobs as $lob): ?>
+                                    <option value="<?= (int)$lob['id'] ?>" data-fy="<?= (int)($lob['fiscal_year'] ?: $currentFy) ?>" <?= ($editItem && $editItem['lob_id'] == $lob['id']) || ($filterLob == $lob['id']) ? 'selected' : '' ?>>
+                                        <?= e($lob['name']) ?> (<?= e($lob['code'] ?: 'No Code') ?>) - FY<?= (int)($lob['fiscal_year'] ?: $currentFy) ?>
                                     </option>
                                 <?php endforeach; ?>
                             </select>
                         </div>
 
-                        <div class="col-md-6">
+                        <div class="col-md-4">
                             <label class="form-label fw-semibold">Class / Category</label>
                             <select name="class" id="class_select" class="form-select">
                                 <option value="">-- Select Class --</option>
@@ -266,15 +294,39 @@ $monthsNames = [
             const lobClassesMap = <?= json_encode($lobClassesMap) ?>;
             const currentSelectedClass = <?= json_encode($editItem['class'] ?? '') ?>;
 
+            function filterLobsByFy() {
+                const fySelect = document.getElementById('fy_form_select');
+                const lobSelect = document.getElementById('lob_select');
+                if (!fySelect || !lobSelect) return;
+
+                const selectedFy = fySelect.value;
+                const options = lobSelect.querySelectorAll('option');
+
+                let hasSelectedMatch = false;
+                options.forEach(function(opt) {
+                    if (!opt.value) return; // Keep placeholder '-- Select Budget --'
+                    const optFy = opt.getAttribute('data-fy');
+                    if (!selectedFy || optFy === selectedFy) {
+                        opt.style.display = '';
+                        if (opt.selected) hasSelectedMatch = true;
+                    } else {
+                        opt.style.display = 'none';
+                        if (opt.selected) opt.selected = false;
+                    }
+                });
+
+                updateClassOptions();
+            }
+
             function updateClassOptions() {
                 const lobSelect = document.getElementById('lob_select');
                 const classSelect = document.getElementById('class_select');
+                if (!lobSelect || !classSelect) return;
                 const selectedLobId = lobSelect.value;
 
                 classSelect.innerHTML = '<option value="">-- Select Class --</option>';
 
                 if (selectedLobId && lobClassesMap[selectedLobId]) {
-                    // Remove duplicate class names for selected budget
                     const uniqueClasses = [...new Set(lobClassesMap[selectedLobId])];
                     uniqueClasses.forEach(function(className) {
                         const opt = document.createElement('option');
@@ -319,6 +371,7 @@ $monthsNames = [
             }
 
             document.addEventListener('DOMContentLoaded', function() {
+                filterLobsByFy();
                 updateClassOptions();
                 toggleInvoiceMonth();
                 calculateAmounts();
@@ -344,24 +397,47 @@ $monthsNames = [
             </div>
         </div>
 
-        <!-- Filter Bar -->
+        <!-- Filter Bar: Financial Year (selector) -> Budget (LOB) -->
         <div class="card border-0 shadow-sm mb-4">
             <div class="card-body p-3">
                 <form method="GET" class="row g-2 align-items-center">
                     <input type="hidden" name="route" value="budsheets_items">
                     <div class="col-md-4">
-                        <select name="lob_id" class="form-select" onchange="this.form.submit()">
-                            <option value="">-- All Budgets --</option>
-                            <?php foreach ($lobs as $lob): ?>
-                                <option value="<?= (int)$lob['id'] ?>" <?= $filterLob == $lob['id'] ? 'selected' : '' ?>>
-                                    <?= e($lob['name']) ?>
-                                </option>
-                            <?php endforeach; ?>
-                        </select>
+                        <div class="input-group">
+                            <span class="input-group-text bg-light text-primary fw-semibold"><i class="fa-solid fa-calendar-days me-1"></i>FY</span>
+                            <select name="fy" class="form-select fw-bold" onchange="this.form.submit()">
+                                <option value="all" <?= $filterFyParam === 'all' ? 'selected' : '' ?>>-- All Financial Years --</option>
+                                <?php
+                                $fyYears = array_column($managedFys, 'year');
+                                if (!in_array($currentFy, $fyYears)) $fyYears[] = $currentFy;
+                                rsort($fyYears);
+                                foreach (array_unique($fyYears) as $y):
+                                ?>
+                                    <option value="<?= $y ?>" <?= ($selectedFy !== null && $y === $selectedFy) ? 'selected' : '' ?>>
+                                        FY<?= $y ?><?= $y === $currentFy ? ' (Current)' : '' ?>
+                                    </option>
+                                <?php endforeach; ?>
+                            </select>
+                        </div>
                     </div>
-                    <?php if ($filterLob): ?>
+                    <div class="col-md-4">
+                        <div class="input-group">
+                            <span class="input-group-text bg-light text-secondary fw-semibold"><i class="fa-solid fa-sitemap me-1"></i>Budget</span>
+                            <select name="lob_id" class="form-select" onchange="this.form.submit()">
+                                <option value="">-- All Budgets <?= $selectedFy ? 'in FY' . $selectedFy : '' ?> --</option>
+                                <?php foreach ($lobs as $lob): ?>
+                                    <option value="<?= (int)$lob['id'] ?>" <?= $filterLob == $lob['id'] ? 'selected' : '' ?>>
+                                        <?= e($lob['name']) ?> (<?= e($lob['code'] ?: 'No Code') ?>)
+                                    </option>
+                                <?php endforeach; ?>
+                            </select>
+                        </div>
+                    </div>
+                    <?php if ($filterLob || $filterFyParam !== null): ?>
                         <div class="col-md-2">
-                            <a href="<?= url_for('budsheets_items') ?>" class="btn btn-sm btn-outline-secondary">Clear Filter</a>
+                            <a href="<?= url_for('budsheets_items') ?>" class="btn btn-sm btn-outline-secondary">
+                                <i class="fa-solid fa-xmark me-1"></i>Reset Filters
+                            </a>
                         </div>
                     <?php endif; ?>
                 </form>
@@ -390,32 +466,50 @@ $monthsNames = [
                         <tbody>
                             <?php if (empty($items)): ?>
                                 <tr>
-                                    <td colspan="10" class="text-center py-4 text-muted">No budget items found.</td>
+                                    <td colspan="10" class="text-center py-4 text-muted">No budget items found for the selected Financial Year or Budget.</td>
                                 </tr>
                             <?php else: ?>
                                 <?php foreach ($items as $item):
-                                    $costCalc = budsheets_calculate_item_cost_and_tax((float)$item['monthly_cost'], $item['billing_frequency'] ?? 'monthly', $item['tax_type']);
-                                    $monthlyCad = budsheets_convert_to_cad($costCalc['monthly_total'], $item['currency']);
-                                    $annualCad = budsheets_convert_to_cad($costCalc['annual_total'], $item['currency']);
+                                    $itemFy = !empty($item['lob_fiscal_year']) ? (int)$item['lob_fiscal_year'] : ($selectedFy ?? $currentFy);
+                                    $canEditItem = budsheets_user_can_edit_lob($item['lob_id']);
+                                    $hideItemCosts = budsheets_user_should_hide_costs($item['lob_id']);
+                                    $costCalc = budsheets_calculate_item_fy_cost($item, $itemFy);
+                                    $monthlyCad = budsheets_convert_to_cad($costCalc['monthly_total'], $item['currency'], $itemFy);
+                                    $annualCad = budsheets_convert_to_cad($costCalc['annual_total'], $item['currency'], $itemFy);
                                 ?>
                                     <tr>
                                         <td class="ps-3">
-                                            <span class="fw-semibold text-dark"><?= e($item['lob_name'] ?: 'Unassigned') ?></span>
+                                            <div class="fw-semibold text-dark"><?= e($item['lob_name'] ?: 'Unassigned') ?></div>
+                                            <span class="badge bg-primary-subtle text-primary border border-primary-subtle">FY<?= $itemFy ?></span>
                                         </td>
                                         <td>
                                             <div class="fw-bold text-dark"><?= e($item['vendor']) ?></div>
                                             <div class="small text-muted"><?= e($item['product']) ?></div>
                                         </td>
                                         <td><span class="badge bg-light text-dark border"><?= e($item['class'] ?: 'N/A') ?></span></td>
-                                        <td class="fw-semibold text-secondary">
-                                            $<?= number_format((float)$item['monthly_cost'], 2) ?> <small><?= e($item['currency']) ?></small>
-                                            <div class="small text-muted">(<?= ucfirst(e($item['billing_frequency'] ?? 'monthly')) ?>)</div>
+                                        <td>
+                                            <?php if ($hideItemCosts): ?>
+                                                <span class="badge bg-secondary-subtle text-secondary border"><i class="fa-solid fa-eye-slash me-1"></i>Hidden</span>
+                                            <?php else: ?>
+                                                <div class="fw-semibold text-secondary">
+                                                    $<?= number_format((float)$item['monthly_cost'], 2) ?> <small><?= e($item['currency']) ?></small>
+                                                </div>
+                                                <div class="small text-muted">(<?= ucfirst(e($item['billing_frequency'] ?? 'monthly')) ?>)</div>
+                                            <?php endif; ?>
                                         </td>
-                                        <td class="fw-bold text-primary">
-                                            $<?= number_format($monthlyCad, 2) ?> CAD
+                                        <td>
+                                            <?php if ($hideItemCosts): ?>
+                                                <span class="badge bg-secondary-subtle text-secondary border"><i class="fa-solid fa-eye-slash me-1"></i>Hidden</span>
+                                            <?php else: ?>
+                                                <div class="fw-bold text-primary">$<?= number_format($monthlyCad, 2) ?> CAD</div>
+                                            <?php endif; ?>
                                         </td>
-                                        <td class="fw-bold text-success">
-                                            $<?= number_format($annualCad, 2) ?> CAD
+                                        <td>
+                                            <?php if ($hideItemCosts): ?>
+                                                <span class="badge bg-secondary-subtle text-secondary border"><i class="fa-solid fa-eye-slash me-1"></i>Hidden</span>
+                                            <?php else: ?>
+                                                <div class="fw-bold text-success">$<?= number_format($annualCad, 2) ?> CAD</div>
+                                            <?php endif; ?>
                                         </td>
                                         <td><span class="badge bg-info-subtle text-info-emphasis"><?= e($item['tax_type']) ?></span></td>
                                         <td>
@@ -434,7 +528,7 @@ $monthsNames = [
                                             <a href="<?= url_for('budsheets_item_detail') ?>&id=<?= (int)$item['id'] ?>" class="btn btn-sm btn-outline-info me-1" title="View Details & Invoices">
                                                 <i class="fa-solid fa-eye"></i>
                                             </a>
-                                            <?php if (has_permission('budsheets_edit')): ?>
+                                            <?php if (has_permission('budsheets_edit') && $canEditItem): ?>
                                                 <a href="<?= url_for('budsheets_items') ?>&action=edit&id=<?= (int)$item['id'] ?>" class="btn btn-sm btn-outline-secondary me-1">
                                                     <i class="fa-solid fa-pen-to-square"></i>
                                                 </a>
@@ -469,23 +563,25 @@ $monthsNames = [
                         </div>
                         <div class="modal-body">
                             <div class="mb-3">
-                                <label class="form-label fw-semibold">Budget</label>
-                                <select name="lob_id" class="form-select">
-                                    <option value="">-- All Budgets --</option>
-                                    <?php foreach ($lobs as $lob): ?>
-                                        <option value="<?= (int)$lob['id'] ?>" <?= $filterLob == $lob['id'] ? 'selected' : '' ?>><?= e($lob['name']) ?></option>
+                                <label class="form-label fw-semibold">Financial Year</label>
+                                <select name="fy" class="form-select">
+                                    <?php
+                                    $fyYears = array_column($managedFys, 'year');
+                                    if (!in_array($currentFy, $fyYears)) $fyYears[] = $currentFy;
+                                    rsort($fyYears);
+                                    foreach (array_unique($fyYears) as $y):
+                                    ?>
+                                        <option value="<?= $y ?>" <?= ($selectedFy ?? $currentFy) === $y ? 'selected' : '' ?>>FY<?= $y ?></option>
                                     <?php endforeach; ?>
                                 </select>
                             </div>
                             <div class="mb-3">
-                                <label class="form-label fw-semibold">Financial Year</label>
-                                <select name="fy" class="form-select">
-                                    <?php
-                                    $currFy = budsheets_get_fiscal_year();
-                                    for ($y = $currFy - 3; $y <= $currFy + 3; $y++):
-                                    ?>
-                                        <option value="<?= $y ?>" <?= $y === $currFy ? 'selected' : '' ?>>FY<?= $y ?></option>
-                                    <?php endfor; ?>
+                                <label class="form-label fw-semibold">Budget</label>
+                                <select name="lob_id" class="form-select">
+                                    <option value="">-- All Budgets --</option>
+                                    <?php foreach ($allLobs as $lob): ?>
+                                        <option value="<?= (int)$lob['id'] ?>" <?= $filterLob == $lob['id'] ? 'selected' : '' ?>><?= e($lob['name']) ?> (FY<?= (int)($lob['fiscal_year'] ?: $currentFy) ?>)</option>
+                                    <?php endforeach; ?>
                                 </select>
                             </div>
                         </div>

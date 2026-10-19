@@ -3,6 +3,10 @@
  * BudSheets Models & Helper functions
  */
 
+if (!defined('BUDSHEETS_VERSION')) {
+    define('BUDSHEETS_VERSION', '1.3.0');
+}
+
 if (!defined('APP_ROOT')) {
     define('APP_ROOT', __DIR__ . '/../../../');
 }
@@ -58,6 +62,19 @@ function budsheets_ensure_tables_exist($pdb) {
                 rate_AUD DECIMAL(8,4) DEFAULT NULL,
                 created_at DATETIME DEFAULT CURRENT_TIMESTAMP
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;");
+        } catch (Exception $ex) {
+            // Ignore
+        }
+    }
+
+    // Auto-migrate notification_emails column in lines_of_business table if missing
+    try {
+        $lobTable = $pdb->getTableName('lines_of_business');
+        $pdb->query("SELECT notification_emails FROM {$lobTable} LIMIT 1");
+    } catch (Exception $e) {
+        try {
+            $lobTable = $pdb->getTableName('lines_of_business');
+            $pdb->query("ALTER TABLE {$lobTable} ADD COLUMN notification_emails TEXT DEFAULT NULL");
         } catch (Exception $ex) {
             // Ignore
         }
@@ -128,6 +145,19 @@ function budsheets_ensure_tables_exist($pdb) {
         try {
             $itemsTable = $pdb->getTableName('items');
             $pdb->query("ALTER TABLE {$itemsTable} ADD COLUMN invoice_month INT DEFAULT NULL");
+        } catch (Exception $ex) {
+            // Ignore
+        }
+    }
+
+    // Auto-migrate access_level column in lob_users table if missing
+    try {
+        $lobUsersTable = $pdb->getTableName('lob_users');
+        $pdb->query("SELECT access_level FROM {$lobUsersTable} LIMIT 1");
+    } catch (Exception $e) {
+        try {
+            $lobUsersTable = $pdb->getTableName('lob_users');
+            $pdb->query("ALTER TABLE {$lobUsersTable} ADD COLUMN access_level VARCHAR(20) NOT NULL DEFAULT 'full'");
         } catch (Exception $ex) {
             // Ignore
         }
@@ -766,23 +796,33 @@ function budsheets_delete_comment($comment_id) {
 // Budgets / Lines of Business (LOB) Operations
 // ==========================================
 
-function budsheets_get_lobs($user_id = null) {
+function budsheets_get_lobs($user_id = null, $fiscal_year = null) {
     $pdb = budsheets_db();
     if (!$pdb) return [];
     $table = $pdb->getTableName('lines_of_business');
     $userLobTable = $pdb->getTableName('lob_users');
 
-    if (has_permission('budsheets_admin')) {
-        return $pdb->query("SELECT * FROM {$table} ORDER BY name ASC")->fetchAll();
+    $where = [];
+    $params = [];
+
+    if (!has_permission('budsheets_admin')) {
+        $currentUserId = ($user_id !== null) ? $user_id : ($_SESSION['user_id'] ?? 0);
+        $where[] = "l.id IN (SELECT lob_id FROM {$userLobTable} WHERE user_id = ?)";
+        $params[] = (int)$currentUserId;
     }
 
-    $currentUserId = ($user_id !== null) ? $user_id : ($_SESSION['user_id'] ?? 0);
-    $sql = "SELECT l.*
-            FROM {$table} l
-            WHERE l.id IN (SELECT lob_id FROM {$userLobTable} WHERE user_id = ?)
-               OR l.id NOT IN (SELECT DISTINCT lob_id FROM {$userLobTable})
-            ORDER BY l.name ASC";
-    return $pdb->query($sql, [(int)$currentUserId])->fetchAll();
+    if ($fiscal_year !== null && $fiscal_year !== '') {
+        $where[] = "l.fiscal_year = ?";
+        $params[] = (int)$fiscal_year;
+    }
+
+    $sql = "SELECT l.* FROM {$table} l";
+    if (!empty($where)) {
+        $sql .= " WHERE " . implode(" AND ", $where);
+    }
+    $sql .= " ORDER BY l.name ASC";
+
+    return $pdb->query($sql, $params)->fetchAll();
 }
 
 function budsheets_user_has_lob_access($lob_id, $user_id = null) {
@@ -794,10 +834,8 @@ function budsheets_user_has_lob_access($lob_id, $user_id = null) {
     if (!$pdb) return false;
     $userLobTable = $pdb->getTableName('lob_users');
 
-    $sql = "SELECT 1 FROM {$userLobTable} WHERE lob_id = ? AND user_id = ?
-            UNION
-            SELECT 1 WHERE NOT EXISTS (SELECT 1 FROM {$userLobTable} WHERE lob_id = ?)";
-    $row = $pdb->query($sql, [(int)$lob_id, (int)$currentUserId, (int)$lob_id])->fetch();
+    $sql = "SELECT 1 FROM {$userLobTable} WHERE lob_id = ? AND user_id = ?";
+    $row = $pdb->query($sql, [(int)$lob_id, (int)$currentUserId])->fetch();
     return !empty($row);
 }
 
@@ -808,7 +846,7 @@ function budsheets_get_lob($id) {
     return $pdb->query("SELECT * FROM {$table} WHERE id = ?", [(int)$id])->fetch();
 }
 
-function budsheets_add_lob($name, $code = '', $description = '', $user_ids = [], $fiscal_year = null) {
+function budsheets_add_lob($name, $code = '', $description = '', $user_ids = [], $fiscal_year = null, $notification_emails = '') {
     $pdb = budsheets_db();
     if (!$pdb) return false;
 
@@ -817,11 +855,12 @@ function budsheets_add_lob($name, $code = '', $description = '', $user_ids = [],
     }
 
     $table = $pdb->getTableName('lines_of_business');
-    $pdb->query("INSERT INTO {$table} (name, code, description, fiscal_year) VALUES (?, ?, ?, ?)", [
+    $pdb->query("INSERT INTO {$table} (name, code, description, fiscal_year, notification_emails) VALUES (?, ?, ?, ?, ?)", [
         trim($name),
         trim($code),
         trim($description),
-        (int)$fiscal_year
+        (int)$fiscal_year,
+        trim($notification_emails)
     ]);
     $lob_id = budsheets_last_insert_id($pdb);
 
@@ -831,7 +870,7 @@ function budsheets_add_lob($name, $code = '', $description = '', $user_ids = [],
     return $lob_id;
 }
 
-function budsheets_update_lob($id, $name, $code = '', $description = '', $user_ids = null, $fiscal_year = null) {
+function budsheets_update_lob($id, $name, $code = '', $description = '', $user_ids = null, $fiscal_year = null, $notification_emails = null) {
     $pdb = budsheets_db();
     if (!$pdb) return false;
 
@@ -841,13 +880,24 @@ function budsheets_update_lob($id, $name, $code = '', $description = '', $user_i
     }
 
     $table = $pdb->getTableName('lines_of_business');
-    $res = $pdb->query("UPDATE {$table} SET name = ?, code = ?, description = ?, fiscal_year = ? WHERE id = ?", [
-        trim($name),
-        trim($code),
-        trim($description),
-        (int)$fiscal_year,
-        (int)$id
-    ]);
+    if ($notification_emails !== null) {
+        $res = $pdb->query("UPDATE {$table} SET name = ?, code = ?, description = ?, fiscal_year = ?, notification_emails = ? WHERE id = ?", [
+            trim($name),
+            trim($code),
+            trim($description),
+            (int)$fiscal_year,
+            trim($notification_emails),
+            (int)$id
+        ]);
+    } else {
+        $res = $pdb->query("UPDATE {$table} SET name = ?, code = ?, description = ?, fiscal_year = ? WHERE id = ?", [
+            trim($name),
+            trim($code),
+            trim($description),
+            (int)$fiscal_year,
+            (int)$id
+        ]);
+    }
 
     if ($user_ids !== null) {
         budsheets_set_lob_users($id, $user_ids);
@@ -875,7 +925,7 @@ function budsheets_clone_budget($source_lob_id, $target_name, $target_code, $tar
     $assignedUsers = budsheets_get_lob_users($source_lob_id);
 
     // 1. Create new target Budget assigned to target_fiscal_year
-    $newLobId = budsheets_add_lob($target_name, $target_code, $sourceLob['description'], $assignedUsers, $target_fiscal_year);
+    $newLobId = budsheets_add_lob($target_name, $target_code, $sourceLob['description'], $assignedUsers, $target_fiscal_year, $sourceLob['notification_emails'] ?? '');
     if (!$newLobId) return false;
 
     // 2. Assign same expense classes to new budget
@@ -942,19 +992,78 @@ function budsheets_get_lob_users($lob_id) {
     return array_column($rows, 'user_id');
 }
 
-function budsheets_set_lob_users($lob_id, $user_ids = []) {
+function budsheets_get_lob_user_assignments($lob_id) {
+    $pdb = budsheets_db();
+    if (!$pdb) return [];
+    $table = $pdb->getTableName('lob_users');
+    $rows = $pdb->query("SELECT user_id, access_level FROM {$table} WHERE lob_id = ?", [(int)$lob_id])->fetchAll();
+    $assignments = [];
+    foreach ($rows as $r) {
+        $assignments[(int)$r['user_id']] = $r['access_level'] ?? 'full';
+    }
+    return $assignments;
+}
+
+function budsheets_set_lob_users($lob_id, $user_assignments = []) {
     $pdb = budsheets_db();
     if (!$pdb) return false;
     $table = $pdb->getTableName('lob_users');
 
     $pdb->query("DELETE FROM {$table} WHERE lob_id = ?", [(int)$lob_id]);
 
-    if (!empty($user_ids)) {
-        foreach ($user_ids as $uid) {
-            $pdb->query("INSERT INTO {$table} (lob_id, user_id) VALUES (?, ?)", [(int)$lob_id, (int)$uid]);
+    if (!empty($user_assignments)) {
+        foreach ($user_assignments as $key => $val) {
+            if (is_numeric($key)) {
+                $uid = (int)$key;
+                $level = is_string($val) ? $val : 'full';
+            } else {
+                $uid = (int)$val;
+                $level = 'full';
+            }
+            if ($uid > 0) {
+                if (!in_array($level, ['full', 'read_only', 'hide_costs'], true)) {
+                    $level = 'full';
+                }
+                $pdb->query("INSERT INTO {$table} (lob_id, user_id, access_level) VALUES (?, ?, ?)", [(int)$lob_id, $uid, $level]);
+            }
         }
     }
     return true;
+}
+
+function budsheets_get_user_lob_access_level($lob_id, $user_id = null) {
+    if (has_permission('budsheets_admin')) {
+        return 'full';
+    }
+
+    $currentUserId = ($user_id !== null) ? $user_id : ($_SESSION['user_id'] ?? 0);
+    $pdb = budsheets_db();
+    if (!$pdb) return 'none';
+
+    $table = $pdb->getTableName('lob_users');
+
+    $row = $pdb->query("SELECT access_level FROM {$table} WHERE lob_id = ? AND user_id = ?", [(int)$lob_id, (int)$currentUserId])->fetch();
+    if ($row && !empty($row['access_level'])) {
+        return $row['access_level'];
+    }
+
+    return 'none';
+}
+
+function budsheets_user_can_edit_lob($lob_id, $user_id = null) {
+    if (!has_permission('budsheets_edit')) {
+        return false;
+    }
+    $level = budsheets_get_user_lob_access_level($lob_id, $user_id);
+    return $level === 'full';
+}
+
+function budsheets_user_should_hide_costs($lob_id, $user_id = null) {
+    if (has_permission('budsheets_admin')) {
+        return false;
+    }
+    $level = budsheets_get_user_lob_access_level($lob_id, $user_id);
+    return $level === 'hide_costs';
 }
 
 function budsheets_get_all_system_users() {
@@ -1122,7 +1231,7 @@ function budsheets_delete_class($id) {
 // Budget Items Operations
 // ==========================================
 
-function budsheets_get_items($lob_id = null) {
+function budsheets_get_items($lob_id = null, $fiscal_year = null) {
     $pdb = budsheets_db();
     if (!$pdb) return [];
     $itemsTable = $pdb->getTableName('items');
@@ -1140,9 +1249,14 @@ function budsheets_get_items($lob_id = null) {
         $params[] = (int)$lob_id;
     }
 
+    if ($fiscal_year !== null && $fiscal_year !== '') {
+        $where[] = "l.fiscal_year = ?";
+        $params[] = (int)$fiscal_year;
+    }
+
     if (!has_permission('budsheets_admin')) {
         $currentUserId = $_SESSION['user_id'] ?? 0;
-        $where[] = "(i.lob_id IN (SELECT lob_id FROM {$userLobTable} WHERE user_id = ?) OR i.lob_id NOT IN (SELECT DISTINCT lob_id FROM {$userLobTable}))";
+        $where[] = "i.lob_id IN (SELECT lob_id FROM {$userLobTable} WHERE user_id = ?)";
         $params[] = (int)$currentUserId;
     }
 
@@ -1169,7 +1283,7 @@ function budsheets_get_item($id) {
 
     if (!has_permission('budsheets_admin')) {
         $currentUserId = $_SESSION['user_id'] ?? 0;
-        $sql .= " AND (i.lob_id IN (SELECT lob_id FROM {$userLobTable} WHERE user_id = ?) OR i.lob_id NOT IN (SELECT DISTINCT lob_id FROM {$userLobTable}))";
+        $sql .= " AND i.lob_id IN (SELECT lob_id FROM {$userLobTable} WHERE user_id = ?)";
         $params[] = (int)$currentUserId;
     }
 
@@ -1183,6 +1297,9 @@ function budsheets_save_item($data, $item_id = null) {
     $lobId = (int)$data['lob_id'];
     if (!budsheets_user_has_lob_access($lobId)) {
         die('Access Denied: You do not have permissions for this Budget.');
+    }
+    if (!budsheets_user_can_edit_lob($lobId)) {
+        die('Access Denied: Read-only access for this Budget.');
     }
 
     if ($item_id) {
@@ -1245,6 +1362,9 @@ function budsheets_delete_item($id) {
     if (!$item) {
         die('Access Denied: Budget item not found or access restricted.');
     }
+    if (!budsheets_user_can_edit_lob($item['lob_id'])) {
+        die('Access Denied: Read-only access for this Budget.');
+    }
 
     $itemFy = !empty($item['lob_fiscal_year']) ? (int)$item['lob_fiscal_year'] : budsheets_get_fiscal_year($item['contract_start_date'] ?: ($item['created_at'] ?? null));
     if (budsheets_is_fiscal_year_locked($itemFy)) {
@@ -1295,6 +1415,9 @@ function budsheets_save_contract_files($item_id, $files_array) {
     $item = budsheets_get_item($item_id);
     if (!$item) {
         die('Access Denied: Budget item not found or access restricted.');
+    }
+    if (!budsheets_user_can_edit_lob($item['lob_id'])) {
+        die('Access Denied: Read-only access for this Budget.');
     }
 
     $pdb = budsheets_db();
@@ -1378,6 +1501,9 @@ function budsheets_save_invoice($data, $file = null, $invoice_id = null) {
     $item = budsheets_get_item($itemId);
     if (!$item) {
         die('Access Denied: Target budget item not found or access restricted.');
+    }
+    if (!budsheets_user_can_edit_lob($item['lob_id'])) {
+        die('Access Denied: Read-only access for this Budget.');
     }
 
     $pdb = budsheets_db();
@@ -1475,14 +1601,20 @@ function budsheets_delete_invoice($invoice_id) {
 // Dashboard & Summary Helper (All CAD)
 // ==========================================
 
-function budsheets_get_dashboard_summary() {
+function budsheets_get_dashboard_summary($fiscal_year = null) {
     $pdb = budsheets_db();
     if (!$pdb) {
         return ['lob_count' => 0, 'item_count' => 0, 'total_invoiced_cad' => 0, 'monthly_cost_cad' => 0, 'annual_cost_cad' => 0];
     }
 
-    $lobs = budsheets_get_lobs();
-    $items = budsheets_get_items();
+    if ($fiscal_year === null || $fiscal_year === '') {
+        $fiscal_year = budsheets_get_fiscal_year();
+    } else {
+        $fiscal_year = (int)$fiscal_year;
+    }
+
+    $lobs = budsheets_get_lobs(null, $fiscal_year);
+    $items = budsheets_get_items(null, $fiscal_year);
     $invTable = $pdb->getTableName('invoices');
 
     $lobCount = count($lobs);
@@ -1499,12 +1631,11 @@ function budsheets_get_dashboard_summary() {
         }
     }
 
-    $fy = budsheets_get_fiscal_year();
     $monthlyCostCad = 0.0;
     $annualCostCad = 0.0;
 
     foreach ($items as $item) {
-        $itemFy = !empty($item['lob_fiscal_year']) ? (int)$item['lob_fiscal_year'] : $fy;
+        $itemFy = !empty($item['lob_fiscal_year']) ? (int)$item['lob_fiscal_year'] : $fiscal_year;
         $fyCalc = budsheets_calculate_item_fy_cost($item, $itemFy);
         $monthlyCostCad += budsheets_convert_to_cad($fyCalc['monthly_total'], $item['currency'], $itemFy);
         $annualCostCad += budsheets_convert_to_cad($fyCalc['annual_total'], $item['currency'], $itemFy);
@@ -1591,9 +1722,9 @@ function budsheets_handle_file_download() {
 
 function budsheets_export_items_csv() {
     $lob_id = isset($_GET['lob_id']) && $_GET['lob_id'] !== '' ? (int)$_GET['lob_id'] : null;
-    $fy = isset($_GET['fy']) ? (int)$_GET['fy'] : budsheets_get_fiscal_year();
+    $fy = isset($_GET['fy']) && $_GET['fy'] !== '' ? (int)$_GET['fy'] : budsheets_get_fiscal_year();
 
-    $items = budsheets_get_items($lob_id);
+    $items = budsheets_get_items($lob_id, $fy);
     $fyMonthsOrder = budsheets_get_fiscal_year_months();
 
     $monthsNames = [
@@ -1671,4 +1802,197 @@ function budsheets_export_items_csv() {
 
     fclose($output);
     exit;
+}
+
+// ==========================================
+// Email & Weekly Budget Summary Reports
+// ==========================================
+
+function budsheets_send_email($to, $subject, $body, $headers = []) {
+    if (function_exists('send_email')) {
+        return send_email($to, $subject, $body, $headers);
+    }
+    if (function_exists('wp_mail')) {
+        return wp_mail($to, $subject, $body, $headers);
+    }
+    $defaultHeaders = [
+        'MIME-Version: 1.0',
+        'Content-type: text/html; charset=utf-8',
+        'From: BudSheets Operational Budgets <noreply@portal.local>'
+    ];
+    $mergedHeaders = array_merge($defaultHeaders, is_array($headers) ? $headers : [$headers]);
+    return @mail($to, $subject, $body, implode("\r\n", $mergedHeaders));
+}
+
+function budsheets_generate_weekly_summary_html($fiscal_year = null) {
+    if ($fiscal_year === null || $fiscal_year === '') {
+        $fiscal_year = budsheets_get_fiscal_year();
+    } else {
+        $fiscal_year = (int)$fiscal_year;
+    }
+
+    $summary = budsheets_get_dashboard_summary($fiscal_year);
+    $lobs = budsheets_get_lobs(null, $fiscal_year);
+    $items = budsheets_get_items(null, $fiscal_year);
+
+    $html = '
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <meta charset="utf-8">
+        <title>Weekly Operational Budget Summary - FY' . $fiscal_year . '</title>
+        <style>
+            body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; color: #212529; background-color: #f8f9fa; margin: 0; padding: 20px; }
+            .container { max-width: 700px; margin: 0 auto; background: #ffffff; padding: 25px; border-radius: 8px; border: 1px solid #e9ecef; }
+            .header { border-bottom: 2px solid #0d6efd; padding-bottom: 15px; margin-bottom: 20px; }
+            .header h1 { margin: 0; color: #0d6efd; font-size: 22px; }
+            .header p { margin: 5px 0 0 0; color: #6c757d; font-size: 13px; }
+            .kpi-table { width: 100%; border-collapse: collapse; margin-bottom: 25px; }
+            .kpi-card { background: #f1f5f9; padding: 15px; text-align: center; border-radius: 6px; }
+            .kpi-card .number { font-size: 20px; font-weight: bold; color: #0f172a; margin-top: 5px; }
+            .kpi-card .label { font-size: 11px; text-transform: uppercase; color: #64748b; font-weight: 600; }
+            .data-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+            .data-table th { background: #f8fafc; border-bottom: 2px solid #cbd5e1; text-align: left; padding: 10px; color: #334155; }
+            .data-table td { border-bottom: 1px solid #e2e8f0; padding: 10px; color: #1e293b; }
+            .footer { margin-top: 25px; pt-3; border-top: 1px solid #e2e8f0; font-size: 11px; color: #94a3b8; text-align: center; }
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <div class="header">
+                <h1>Weekly Budget Summary Report (FY' . $fiscal_year . ')</h1>
+                <p>Generated on ' . date('F j, Y - H:i T') . ' | Operational Budget Sheets (BudSheets)</p>
+            </div>
+
+            <table class="kpi-table">
+                <tr>
+                    <td style="width: 25%; padding: 4px;">
+                        <div class="kpi-card">
+                            <div class="label">Budgets</div>
+                            <div class="number">' . (int)$summary['lob_count'] . '</div>
+                        </div>
+                    </td>
+                    <td style="width: 25%; padding: 4px;">
+                        <div class="kpi-card">
+                            <div class="label">Budget Items</div>
+                            <div class="number">' . (int)$summary['item_count'] . '</div>
+                        </div>
+                    </td>
+                    <td style="width: 25%; padding: 4px;">
+                        <div class="kpi-card">
+                            <div class="label">Monthly Total (CAD)</div>
+                            <div class="number">$' . number_format((float)$summary['monthly_cost_cad'], 2) . '</div>
+                        </div>
+                    </td>
+                    <td style="width: 25%; padding: 4px;">
+                        <div class="kpi-card">
+                            <div class="label">Total Invoiced (CAD)</div>
+                            <div class="number" style="color: #16a34a;">$' . number_format((float)$summary['total_invoiced_cad'], 2) . '</div>
+                        </div>
+                    </td>
+                </tr>
+            </table>
+
+            <h3 style="font-size: 16px; margin-bottom: 12px; color: #0f172a;">Budget Allocations Breakdown (CAD)</h3>
+            <table class="data-table">
+                <thead>
+                    <tr>
+                        <th>Budget</th>
+                        <th>Code</th>
+                        <th style="text-align: center;">Items</th>
+                        <th>Monthly Avg (w/ Tax)</th>
+                        <th>Annual Total (w/ Tax)</th>
+                    </tr>
+                </thead>
+                <tbody>';
+
+    if (empty($lobs)) {
+        $html .= '<tr><td colspan="5" style="text-align: center; color: #94a3b8;">No Budgets found for FY' . $fiscal_year . '.</td></tr>';
+    } else {
+        foreach ($lobs as $lob) {
+            $lobItems = array_filter($items, function($i) use ($lob) { return $i['lob_id'] == $lob['id']; });
+            $lobFy = !empty($lob['fiscal_year']) ? (int)$lob['fiscal_year'] : $fiscal_year;
+            $lobMonthlyTotalCad = 0.0;
+            $lobAnnualTotalCad = 0.0;
+            foreach ($lobItems as $li) {
+                $fyCalc = budsheets_calculate_item_fy_cost($li, $lobFy);
+                $lobMonthlyTotalCad += budsheets_convert_to_cad($fyCalc['monthly_total'], $li['currency'], $lobFy);
+                $lobAnnualTotalCad += budsheets_convert_to_cad($fyCalc['annual_total'], $li['currency'], $lobFy);
+            }
+
+            $html .= '<tr>
+                <td><strong>' . htmlspecialchars($lob['name']) . '</strong></td>
+                <td>' . htmlspecialchars($lob['code'] ?: 'N/A') . '</td>
+                <td style="text-align: center;">' . count($lobItems) . '</td>
+                <td style="font-weight: 600; color: #2563eb;">$' . number_format($lobMonthlyTotalCad, 2) . ' CAD</td>
+                <td style="font-weight: 600; color: #16a34a;">$' . number_format($lobAnnualTotalCad, 2) . ' CAD</td>
+            </tr>';
+        }
+    }
+
+    $html .= '
+                </tbody>
+            </table>
+
+            <div class="footer">
+                <p>This automated email summary was dispatched by BudSheets Operational Budget Tracker.</p>
+            </div>
+        </div>
+    </body>
+    </html>';
+
+    return $html;
+}
+
+function budsheets_send_weekly_summary_report($fiscal_year = null, $target_email = null) {
+    if ($fiscal_year === null || $fiscal_year === '') {
+        $fiscal_year = budsheets_get_fiscal_year();
+    } else {
+        $fiscal_year = (int)$fiscal_year;
+    }
+
+    $subject = "Weekly Operational Budget Summary - FY" . $fiscal_year . " (" . date('M j, Y') . ")";
+    $body = budsheets_generate_weekly_summary_html($fiscal_year);
+
+    $recipients = [];
+
+    if (!empty($target_email) && filter_var($target_email, FILTER_VALIDATE_EMAIL)) {
+        $recipients[] = trim($target_email);
+    } else {
+        // Collect budget-specific notification emails
+        $lobs = budsheets_get_lobs(null, $fiscal_year);
+        foreach ($lobs as $lob) {
+            if (!empty($lob['notification_emails'])) {
+                $rawEmails = preg_split('/[\s,;\n]+/', $lob['notification_emails']);
+                foreach ($rawEmails as $e) {
+                    $e = trim($e);
+                    if (!empty($e) && filter_var($e, FILTER_VALIDATE_EMAIL)) {
+                        $recipients[] = $e;
+                    }
+                }
+            }
+        }
+
+        // Collect system user emails
+        $systemUsers = budsheets_get_all_system_users();
+        foreach ($systemUsers as $u) {
+            if (!empty($u['email']) && filter_var($u['email'], FILTER_VALIDATE_EMAIL)) {
+                $recipients[] = trim($u['email']);
+            }
+        }
+    }
+
+    $recipients = array_unique($recipients);
+    if (empty($recipients)) {
+        return false;
+    }
+
+    $success = true;
+    foreach ($recipients as $email) {
+        if (!budsheets_send_email($email, $subject, $body)) {
+            $success = false;
+        }
+    }
+
+    return $success;
 }
