@@ -59,6 +59,12 @@ if (function_exists('add_filter')) {
 
 // Register Action Hooks for Execution
 if (function_exists('add_action')) {
+    add_action('init_scheduler', function($scheduler) {
+        if (is_object($scheduler) && method_exists($scheduler, 'registerTask')) {
+            $scheduler->registerTask('budsheets_weekly_summary_report', 'budsheets_task_weekly_summary_email', 604800, 'budsheets');
+        }
+    });
+
     add_action('budsheets_weekly_cron', 'budsheets_task_weekly_summary_email');
     add_action('plugin_cron_weekly', 'budsheets_task_weekly_summary_email');
     add_action('cron_weekly', 'budsheets_task_weekly_summary_email');

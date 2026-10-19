@@ -2,6 +2,13 @@
 
 All notable changes to the BudSheets plugin will be documented in this file.
 
+## [1.5.0] - 2026-03-31
+
+### Added
+- **`init_scheduler` Hook Registration**: Registered scheduled task via `init_scheduler` action hook using `$scheduler->registerTask('budsheets_weekly_summary_report', ...)` for zzz5 Task Scheduler Overrides integration.
+
+---
+
 ## [1.4.0] - 2026-03-31
 
 ### Added

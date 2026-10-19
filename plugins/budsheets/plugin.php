@@ -3,7 +3,7 @@
  * Plugin Name: Operational Budget Sheets (BudSheets)
  * Plugin URI: https://github.com/devdog1/zzz5
  * Description: Enterprise operational budget tracking plugin for zzz5 Portal Framework. Manage Budgets (Lines of Business), expense classes, budget items, contract documents, and invoices.
- * Version: 1.4.0
+ * Version: 1.5.0
  * Author: DevDog
  * Author URI: https://github.com/devdog1
  * Permissions: budsheets_view, budsheets_edit, budsheets_admin
@@ -153,6 +153,13 @@ add_action('task_scheduler_run_budsheets_weekly_summary_report', function() {
 
 add_action('run_scheduled_task_budsheets_weekly_summary_report', function() {
     budsheets_send_weekly_summary_report();
+});
+
+// Framework Scheduler Initialization Hook
+add_action('init_scheduler', function($scheduler) {
+    if (is_object($scheduler) && method_exists($scheduler, 'registerTask')) {
+        $scheduler->registerTask('budsheets_weekly_summary_report', 'budsheets_send_weekly_summary_report', 604800, 'budsheets');
+    }
 });
 
 // Register Scheduled Tasks for Framework Task Scheduler & Overrides Page
