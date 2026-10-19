@@ -487,6 +487,7 @@ assert(isset($registered_routes['budsheets_items']), 'Route budsheets_items is r
 assert(isset($registered_routes['budsheets_item_detail']), 'Route budsheets_item_detail is registered');
 assert(isset($registered_routes['budsheets_download_file']), 'Route budsheets_download_file is registered');
 assert(isset($registered_routes['budsheets_export_csv']), 'Route budsheets_export_csv is registered');
+assert(isset($registered_routes['budsheets_run_scheduled_task']), 'Route budsheets_run_scheduled_task is registered');
 
 assert(isset($registered_filters['theme_nav_links']), 'theme_nav_links filter hook registered');
 assert(isset($registered_actions['index_dashboard_widgets']), 'index_dashboard_widgets action hook registered');
@@ -559,11 +560,11 @@ echo "  ✓ Weekly Summary Report HTML Generation & Email Dispatch tests passed.
 // Test 15: Local Plugin Versioning & Changelog File Check
 echo "[TEST] Testing Local Plugin Versioning and CHANGELOG.md...\n";
 assert(defined('BUDSHEETS_VERSION'), 'BUDSHEETS_VERSION constant is defined');
-assert(BUDSHEETS_VERSION === '1.2.0', 'BUDSHEETS_VERSION is set to 1.2.0');
+assert(BUDSHEETS_VERSION === '1.3.0', 'BUDSHEETS_VERSION is set to 1.3.0');
 $changelogFile = __DIR__ . '/../plugins/budsheets/CHANGELOG.md';
 assert(file_exists($changelogFile), 'CHANGELOG.md file exists in plugin folder');
 $clContent = file_get_contents($changelogFile);
-assert(strpos($clContent, '[1.2.0]') !== false, 'CHANGELOG.md contains version 1.2.0 release notes');
+assert(strpos($clContent, '[1.3.0]') !== false, 'CHANGELOG.md contains version 1.3.0 release notes');
 echo "  ✓ Plugin versioning and CHANGELOG.md tests passed.\n";
 
 echo "\nALL BUDSHEETS PLUGIN TESTS PASSED SUCCESSFULLY!\n";

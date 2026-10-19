@@ -2,6 +2,14 @@
 
 All notable changes to the BudSheets plugin will be documented in this file.
 
+## [1.3.0] - 2026-03-31
+
+### Added
+- **Manual Task Execution Route**: Added `budsheets_run_scheduled_task` route and "Run Task Now (Manual Trigger)" button in Plugin Settings (`views/settings.php`).
+- **Task Scheduler Execution Hooks**: Registered action execution hooks `task_scheduler_run_budsheets_weekly_summary_report` and `run_scheduled_task_budsheets_weekly_summary_report` for Task Scheduler Overrides integration.
+
+---
+
 ## [1.2.0] - 2026-03-31
 
 ### Added

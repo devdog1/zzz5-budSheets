@@ -3,7 +3,7 @@
  * Plugin Name: Operational Budget Sheets (BudSheets)
  * Plugin URI: https://github.com/devdog1/zzz5
  * Description: Enterprise operational budget tracking plugin for zzz5 Portal Framework. Manage Budgets (Lines of Business), expense classes, budget items, contract documents, and invoices.
- * Version: 1.2.0
+ * Version: 1.3.0
  * Author: DevDog
  * Author URI: https://github.com/devdog1
  * Permissions: budsheets_view, budsheets_edit, budsheets_admin
@@ -139,6 +139,14 @@ add_action('budsheets_weekly_cron', function() {
     budsheets_send_weekly_summary_report();
 });
 
+add_action('task_scheduler_run_budsheets_weekly_summary_report', function() {
+    budsheets_send_weekly_summary_report();
+});
+
+add_action('run_scheduled_task_budsheets_weekly_summary_report', function() {
+    budsheets_send_weekly_summary_report();
+});
+
 // Register Scheduled Tasks for Framework Task Scheduler & Overrides Page
 $budsheetsRegisterTask = function($tasks = []) {
     if (!is_array($tasks)) {
@@ -231,6 +239,24 @@ add_action('register_routes', function() {
             set_flash_message('success', 'Weekly budget summary report email dispatched successfully.');
         } else {
             set_flash_message('danger', 'Failed to dispatch weekly summary report email. Verify email addresses or mail settings.');
+        }
+        redirect(url_for('budsheets_settings'));
+    });
+
+    register_route('budsheets_run_scheduled_task', function() {
+        if (!has_permission('budsheets_admin')) {
+            die('Access Denied: Admin permissions required.');
+        }
+        if ($_SERVER['REQUEST_METHOD'] === 'POST' && function_exists('validate_csrf')) {
+            validate_csrf();
+        }
+        $fy = isset($_POST['fiscal_year']) ? (int)$_POST['fiscal_year'] : (isset($_GET['fy']) ? (int)$_GET['fy'] : budsheets_get_fiscal_year());
+        $target = trim($_POST['target_email'] ?? ($_GET['email'] ?? ''));
+        $res = budsheets_send_weekly_summary_report($fy, $target ?: null);
+        if ($res) {
+            set_flash_message('success', "Scheduled Task Executed: Weekly budget summary report (FY{$fy}) generated and sent.");
+        } else {
+            set_flash_message('danger', "Failed to execute weekly budget summary report task.");
         }
         redirect(url_for('budsheets_settings'));
     });

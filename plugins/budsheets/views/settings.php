@@ -188,22 +188,19 @@ $managedFyList = budsheets_get_managed_fiscal_years(true);
                 </div>
             </div>
 
-            <!-- Weekly Email Summary Reports Box -->
+            <!-- Scheduled Weekly Email Task Setup & Execution Box -->
             <div class="card border-0 shadow-sm mt-4">
-                <div class="card-header bg-white py-3">
-                    <h5 class="fw-bold mb-0 text-dark"><i class="fa-solid fa-envelope me-2 text-primary"></i>Weekly Budget Email Summary Reports</h5>
+                <div class="card-header bg-white py-3 d-flex justify-content-between align-items-center">
+                    <h5 class="fw-bold mb-0 text-dark"><i class="fa-solid fa-clock-rotate-left me-2 text-primary"></i>Scheduled Email Reports & Task Execution</h5>
+                    <span class="badge bg-success-subtle text-success border border-success-subtle"><i class="fa-solid fa-circle-check me-1"></i>Task Hook Registered</span>
                 </div>
                 <div class="card-body">
-                    <p class="small text-muted mb-3">Send or test automated HTML weekly budget summary reports for active Lines of Business and expenses.</p>
-                    <form method="POST" action="<?= url_for('budsheets_send_test_email') ?>">
+                    <p class="small text-muted mb-3">Configure automated weekly email dispatches or manually execute the email task on demand. The task is registered with the framework's Task Scheduler and Overrides interface under hook ID <code>budsheets_weekly_summary_report</code>.</p>
+
+                    <form method="POST" action="<?= url_for('budsheets_run_scheduled_task') ?>">
                         <?php if (function_exists('csrf_field')) echo csrf_field(); ?>
                         <div class="mb-3">
-                            <label class="form-label fw-semibold small">Recipient Email Address (Optional Test Email)</label>
-                            <input type="email" name="target_email" class="form-control form-control-sm" placeholder="e.g. admin@domain.com (Leave blank for all users)">
-                            <div class="form-text">Leave blank to dispatch to all registered system users, or enter a specific email address for a test run.</div>
-                        </div>
-                        <div class="mb-3">
-                            <label class="form-label fw-semibold small">Financial Year Summary</label>
+                            <label class="form-label fw-semibold small">Financial Year Target</label>
                             <select name="fiscal_year" class="form-select form-select-sm">
                                 <?php foreach ($managedFyList as $fyRow): ?>
                                     <option value="<?= (int)$fyRow['year'] ?>" <?= (int)$fyRow['year'] === $currentFy ? 'selected' : '' ?>>
@@ -212,8 +209,18 @@ $managedFyList = budsheets_get_managed_fiscal_years(true);
                                 <?php endforeach; ?>
                             </select>
                         </div>
-                        <div class="text-end">
-                            <button type="submit" class="btn btn-sm btn-outline-primary"><i class="fa-solid fa-paper-plane me-1"></i> Dispatch Weekly Summary Email</button>
+                        <div class="mb-3">
+                            <label class="form-label fw-semibold small">Recipient Override (Optional)</label>
+                            <input type="email" name="target_email" class="form-control form-control-sm" placeholder="e.g. manager@domain.com (Leave blank to use Budget Notification Emails & System Users)">
+                            <div class="form-text">When left blank, reports are sent to recipient email address(es) configured on each budget (LOB) as well as registered system users.</div>
+                        </div>
+                        <div class="d-flex justify-content-between align-items-center pt-2 border-top mt-3">
+                            <button type="submit" name="action_mode" value="run_task" class="btn btn-sm btn-primary">
+                                <i class="fa-solid fa-play me-1"></i> Run Task Now (Manual Trigger)
+                            </button>
+                            <button type="submit" formaction="<?= url_for('budsheets_send_test_email') ?>" class="btn btn-sm btn-outline-secondary">
+                                <i class="fa-solid fa-paper-plane me-1"></i> Send Test Email
+                            </button>
                         </div>
                     </form>
                 </div>
