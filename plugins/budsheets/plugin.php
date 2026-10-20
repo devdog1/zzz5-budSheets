@@ -3,7 +3,7 @@
  * Plugin Name: Operational Budget Sheets (BudSheets)
  * Plugin URI: https://github.com/devdog1/zzz5
  * Description: Enterprise operational budget tracking plugin for zzz5 Portal Framework. Manage Budgets (Lines of Business), expense classes, budget items, contract documents, and invoices.
- * Version: 1.5.0
+ * Version: 1.6.0
  * Author: DevDog
  * Author URI: https://github.com/devdog1
  * Permissions: budsheets_view, budsheets_edit, budsheets_admin
@@ -17,13 +17,6 @@ if (!defined('APP_ROOT')) {
 // Require Helper / Model logic
 require_once __DIR__ . '/models/budsheets-model.php';
 
-// Auto-load Task files from tasks/ directory
-$tasksDir = __DIR__ . '/tasks/';
-if (is_dir($tasksDir)) {
-    foreach (glob($tasksDir . '*.php') as $taskFile) {
-        require_once $taskFile;
-    }
-}
 
 // Plugin Activation Lifecycle Hook (Executes install.sql)
 add_action('plugin_activate_budsheets', function() {
@@ -130,64 +123,6 @@ add_action('index_dashboard_widgets', function ($userContext) {
     <?php
 });
 
-// Scheduled Weekly Task Scheduler Hooks
-add_action('cron_weekly', function() {
-    budsheets_send_weekly_summary_report();
-});
-
-add_action('plugin_cron_weekly', function() {
-    budsheets_send_weekly_summary_report();
-});
-
-add_action('schedule_weekly_tasks', function() {
-    budsheets_send_weekly_summary_report();
-});
-
-add_action('budsheets_weekly_cron', function() {
-    budsheets_send_weekly_summary_report();
-});
-
-add_action('task_scheduler_run_budsheets_weekly_summary_report', function() {
-    budsheets_send_weekly_summary_report();
-});
-
-add_action('run_scheduled_task_budsheets_weekly_summary_report', function() {
-    budsheets_send_weekly_summary_report();
-});
-
-// Framework Scheduler Initialization Hook
-add_action('init_scheduler', function($scheduler) {
-    if (is_object($scheduler) && method_exists($scheduler, 'registerTask')) {
-        $scheduler->registerTask('budsheets_weekly_summary_report', 'budsheets_send_weekly_summary_report', 604800, 'budsheets');
-    }
-});
-
-// Register Scheduled Tasks for Framework Task Scheduler & Overrides Page
-$budsheetsRegisterTask = function($tasks = []) {
-    if (!is_array($tasks)) {
-        $tasks = [];
-    }
-    $tasks['budsheets_weekly_summary_report'] = [
-        'id'          => 'budsheets_weekly_summary_report',
-        'key'         => 'budsheets_weekly_summary_report',
-        'name'        => 'BudSheets Weekly Budget Summary Email Report',
-        'title'       => 'BudSheets Weekly Budget Summary Email Report',
-        'description' => 'Dispatches automated weekly HTML budget summary reports to configured budget notification email recipients and system users.',
-        'plugin'      => 'budsheets',
-        'schedule'    => 'weekly',
-        'interval'    => 604800,
-        'hook'        => 'budsheets_weekly_cron',
-        'callback'    => 'budsheets_send_weekly_summary_report',
-        'enabled'     => true
-    ];
-    return $tasks;
-};
-
-add_filter('register_scheduled_tasks', $budsheetsRegisterTask);
-add_filter('task_scheduler_tasks', $budsheetsRegisterTask);
-add_filter('scheduled_tasks', $budsheetsRegisterTask);
-add_filter('plugin_scheduled_tasks', $budsheetsRegisterTask);
-add_filter('get_scheduled_tasks', $budsheetsRegisterTask);
 
 // Routes Registration
 add_action('register_routes', function() {
@@ -240,39 +175,4 @@ add_action('register_routes', function() {
         budsheets_export_items_csv();
     });
 
-    register_route('budsheets_send_test_email', function() {
-        if (!has_permission('budsheets_admin')) {
-            die('Access Denied: Admin permissions required.');
-        }
-        if (function_exists('validate_csrf')) {
-            validate_csrf();
-        }
-        $target = trim($_POST['target_email'] ?? ($_GET['email'] ?? ''));
-        $fy = isset($_POST['fiscal_year']) ? (int)$_POST['fiscal_year'] : budsheets_get_fiscal_year();
-        $res = budsheets_send_weekly_summary_report($fy, $target);
-        if ($res) {
-            set_flash_message('success', 'Weekly budget summary report email dispatched successfully.');
-        } else {
-            set_flash_message('danger', 'Failed to dispatch weekly summary report email. Verify email addresses or mail settings.');
-        }
-        redirect(url_for('budsheets_settings'));
-    });
-
-    register_route('budsheets_run_scheduled_task', function() {
-        if (!has_permission('budsheets_admin')) {
-            die('Access Denied: Admin permissions required.');
-        }
-        if ($_SERVER['REQUEST_METHOD'] === 'POST' && function_exists('validate_csrf')) {
-            validate_csrf();
-        }
-        $fy = isset($_POST['fiscal_year']) ? (int)$_POST['fiscal_year'] : (isset($_GET['fy']) ? (int)$_GET['fy'] : budsheets_get_fiscal_year());
-        $target = trim($_POST['target_email'] ?? ($_GET['email'] ?? ''));
-        $res = budsheets_send_weekly_summary_report($fy, $target ?: null);
-        if ($res) {
-            set_flash_message('success', "Scheduled Task Executed: Weekly budget summary report (FY{$fy}) generated and sent.");
-        } else {
-            set_flash_message('danger', "Failed to execute weekly budget summary report task.");
-        }
-        redirect(url_for('budsheets_settings'));
-    });
 });

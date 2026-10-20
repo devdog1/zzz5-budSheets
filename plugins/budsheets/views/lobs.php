@@ -33,7 +33,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $code = trim($_POST['code'] ?? '');
         $description = trim($_POST['description'] ?? '');
         $fiscal_year = (int)($_POST['fiscal_year'] ?? $currentFy);
-        $notification_emails = trim($_POST['notification_emails'] ?? '');
         $assigned_user_ids = $_POST['assigned_user_ids'] ?? [];
         $user_access_levels = $_POST['user_access_levels'] ?? [];
 
@@ -48,14 +47,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $error = 'Budget name is required.';
         } else {
             if ($action === 'create_lob') {
-                if (budsheets_add_lob($name, $code, $description, $user_assignments, $fiscal_year, $notification_emails)) {
+                if (budsheets_add_lob($name, $code, $description, $user_assignments, $fiscal_year)) {
                     $message = 'Budget created successfully.';
                 } else {
                     $error = 'Failed to create Budget.';
                 }
             } else {
                 $lob_id = (int)($_POST['lob_id'] ?? 0);
-                if (budsheets_update_lob($lob_id, $name, $code, $description, $user_assignments, $fiscal_year, $notification_emails)) {
+                if (budsheets_update_lob($lob_id, $name, $code, $description, $user_assignments, $fiscal_year)) {
                     $message = 'Budget updated successfully.';
                 } else {
                     $error = 'Failed to update Budget.';
@@ -317,11 +316,6 @@ $lobs = budsheets_get_lobs(null, $selectedFy);
                                                         <label class="form-label fw-semibold">Description</label>
                                                         <textarea name="description" class="form-control" rows="2"><?= e($lob['description']) ?></textarea>
                                                     </div>
-                                                    <div class="mb-3">
-                                                        <label class="form-label fw-semibold">Report Notification Emails</label>
-                                                        <input type="text" name="notification_emails" class="form-control" value="<?= e($lob['notification_emails'] ?? '') ?>" placeholder="e.g. manager@domain.com, finance@domain.com">
-                                                        <div class="form-text">Comma or space separated email address(es) to receive automated weekly budget summary reports.</div>
-                                                    </div>
                                                     <?php if (!empty($systemUsers)): ?>
                                                         <div class="mb-3">
                                                             <label class="form-label fw-semibold">User Access Assignments & Permissions</label>
@@ -467,11 +461,6 @@ $lobs = budsheets_get_lobs(null, $selectedFy);
                     <div class="mb-3">
                         <label class="form-label fw-semibold">Description</label>
                         <textarea name="description" class="form-control" rows="2" placeholder="Brief description of this budget..."></textarea>
-                    </div>
-                    <div class="mb-3">
-                        <label class="form-label fw-semibold">Report Notification Emails</label>
-                        <input type="text" name="notification_emails" class="form-control" placeholder="e.g. manager@domain.com, finance@domain.com">
-                        <div class="form-text">Comma or space separated email address(es) to receive automated weekly budget summary reports.</div>
                     </div>
                     <?php if (!empty($systemUsers)): ?>
                         <div class="mb-3">

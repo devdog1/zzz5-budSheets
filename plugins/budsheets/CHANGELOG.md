@@ -2,6 +2,13 @@
 
 All notable changes to the BudSheets plugin will be documented in this file.
 
+## [1.6.0] - 2026-03-31
+
+### Removed
+- **Email Functions & Reporting Cleanup**: Removed email summary functions, task scheduler hooks, task files, and notification email fields across models, views, schema, and routes per specification.
+
+---
+
 ## [1.5.0] - 2026-03-31
 
 ### Added

@@ -111,7 +111,6 @@ $pdb->query("CREATE TABLE plug_budsheets_lines_of_business (
     code TEXT,
     description TEXT,
     fiscal_year INTEGER,
-    notification_emails TEXT,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );");
@@ -487,13 +486,8 @@ assert(isset($registered_routes['budsheets_items']), 'Route budsheets_items is r
 assert(isset($registered_routes['budsheets_item_detail']), 'Route budsheets_item_detail is registered');
 assert(isset($registered_routes['budsheets_download_file']), 'Route budsheets_download_file is registered');
 assert(isset($registered_routes['budsheets_export_csv']), 'Route budsheets_export_csv is registered');
-assert(isset($registered_routes['budsheets_run_scheduled_task']), 'Route budsheets_run_scheduled_task is registered');
-
 assert(isset($registered_filters['theme_nav_links']), 'theme_nav_links filter hook registered');
 assert(isset($registered_actions['index_dashboard_widgets']), 'index_dashboard_widgets action hook registered');
-assert(isset($registered_actions['init_scheduler']), 'init_scheduler action hook registered');
-assert(isset($registered_filters['register_scheduled_tasks']), 'Task scheduler filter register_scheduled_tasks registered');
-assert(isset($registered_filters['task_scheduler_tasks']), 'Task scheduler filter task_scheduler_tasks registered');
 
 echo "  ✓ Framework hooks & route verification tests passed.\n";
 
@@ -544,30 +538,14 @@ $_SESSION['user_id'] = 1;
 
 echo "  ✓ Read-Only and Hide-Costs access level tests passed.\n";
 
-// Test 14: Weekly Summary Report HTML Generation & Email Dispatch
-echo "[TEST] Testing Weekly Summary Report HTML Generation & Email Dispatch...\n";
-budsheets_update_lob(1, 'InfoTech 2026', 'IT-UPDATED', 'Updated description', [10], 2026, 'it-leads@domain.com, fin@domain.com');
-$itLobUpdated = budsheets_get_lob(1);
-assert($itLobUpdated['notification_emails'] === 'it-leads@domain.com, fin@domain.com', 'Budget notification emails saved successfully');
-
-$reportHtml = budsheets_generate_weekly_summary_html(2026);
-assert(strpos($reportHtml, 'Weekly Budget Summary Report (FY2026)') !== false, 'Report HTML contains correct title');
-assert(strpos($reportHtml, 'Budget Allocations Breakdown') !== false, 'Report HTML contains breakdown table');
-
-$sendResult = budsheets_send_weekly_summary_report(2026);
-assert($sendResult !== null, 'Weekly summary report email function executed successfully');
-echo "  ✓ Weekly Summary Report HTML Generation & Email Dispatch tests passed.\n";
-
-// Test 15: Local Plugin Versioning & Changelog File Check
+// Test 14: Local Plugin Versioning & Changelog File Check
 echo "[TEST] Testing Local Plugin Versioning and CHANGELOG.md...\n";
 assert(defined('BUDSHEETS_VERSION'), 'BUDSHEETS_VERSION constant is defined');
-assert(BUDSHEETS_VERSION === '1.5.0', 'BUDSHEETS_VERSION is set to 1.5.0');
+assert(BUDSHEETS_VERSION === '1.6.0', 'BUDSHEETS_VERSION is set to 1.6.0');
 $changelogFile = __DIR__ . '/../plugins/budsheets/CHANGELOG.md';
 assert(file_exists($changelogFile), 'CHANGELOG.md file exists in plugin folder');
 $clContent = file_get_contents($changelogFile);
-assert(strpos($clContent, '[1.5.0]') !== false, 'CHANGELOG.md contains version 1.5.0 release notes');
-$taskFile = __DIR__ . '/../plugins/budsheets/tasks/weekly_summary_email.php';
-assert(file_exists($taskFile), 'Task file weekly_summary_email.php exists in /tasks/ directory');
+assert(strpos($clContent, '[1.6.0]') !== false, 'CHANGELOG.md contains version 1.6.0 release notes');
 echo "  ✓ Plugin versioning and CHANGELOG.md tests passed.\n";
 
 echo "\nALL BUDSHEETS PLUGIN TESTS PASSED SUCCESSFULLY!\n";

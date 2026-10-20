@@ -4,7 +4,7 @@
  */
 
 if (!defined('BUDSHEETS_VERSION')) {
-    define('BUDSHEETS_VERSION', '1.5.0');
+    define('BUDSHEETS_VERSION', '1.6.0');
 }
 
 if (!defined('APP_ROOT')) {
@@ -67,18 +67,6 @@ function budsheets_ensure_tables_exist($pdb) {
         }
     }
 
-    // Auto-migrate notification_emails column in lines_of_business table if missing
-    try {
-        $lobTable = $pdb->getTableName('lines_of_business');
-        $pdb->query("SELECT notification_emails FROM {$lobTable} LIMIT 1");
-    } catch (Exception $e) {
-        try {
-            $lobTable = $pdb->getTableName('lines_of_business');
-            $pdb->query("ALTER TABLE {$lobTable} ADD COLUMN notification_emails TEXT DEFAULT NULL");
-        } catch (Exception $ex) {
-            // Ignore
-        }
-    }
 
     // Auto-migrate per-FY tax and FX rate columns in fiscal_years if missing
     try {
@@ -846,7 +834,7 @@ function budsheets_get_lob($id) {
     return $pdb->query("SELECT * FROM {$table} WHERE id = ?", [(int)$id])->fetch();
 }
 
-function budsheets_add_lob($name, $code = '', $description = '', $user_ids = [], $fiscal_year = null, $notification_emails = '') {
+function budsheets_add_lob($name, $code = '', $description = '', $user_ids = [], $fiscal_year = null) {
     $pdb = budsheets_db();
     if (!$pdb) return false;
 
@@ -855,12 +843,11 @@ function budsheets_add_lob($name, $code = '', $description = '', $user_ids = [],
     }
 
     $table = $pdb->getTableName('lines_of_business');
-    $pdb->query("INSERT INTO {$table} (name, code, description, fiscal_year, notification_emails) VALUES (?, ?, ?, ?, ?)", [
+    $pdb->query("INSERT INTO {$table} (name, code, description, fiscal_year) VALUES (?, ?, ?, ?)", [
         trim($name),
         trim($code),
         trim($description),
-        (int)$fiscal_year,
-        trim($notification_emails)
+        (int)$fiscal_year
     ]);
     $lob_id = budsheets_last_insert_id($pdb);
 
@@ -870,7 +857,7 @@ function budsheets_add_lob($name, $code = '', $description = '', $user_ids = [],
     return $lob_id;
 }
 
-function budsheets_update_lob($id, $name, $code = '', $description = '', $user_ids = null, $fiscal_year = null, $notification_emails = null) {
+function budsheets_update_lob($id, $name, $code = '', $description = '', $user_ids = null, $fiscal_year = null) {
     $pdb = budsheets_db();
     if (!$pdb) return false;
 
@@ -880,23 +867,15 @@ function budsheets_update_lob($id, $name, $code = '', $description = '', $user_i
     }
 
     $table = $pdb->getTableName('lines_of_business');
-    if ($notification_emails !== null) {
-        $res = $pdb->query("UPDATE {$table} SET name = ?, code = ?, description = ?, fiscal_year = ?, notification_emails = ? WHERE id = ?", [
-            trim($name),
-            trim($code),
-            trim($description),
-            (int)$fiscal_year,
-            trim($notification_emails),
-            (int)$id
-        ]);
-    } else {
-        $res = $pdb->query("UPDATE {$table} SET name = ?, code = ?, description = ?, fiscal_year = ? WHERE id = ?", [
-            trim($name),
-            trim($code),
-            trim($description),
-            (int)$fiscal_year,
-            (int)$id
-        ]);
+    $res = $pdb->query("UPDATE {$table} SET name = ?, code = ?, description = ? WHERE id = ?", [
+        trim($name),
+        trim($code),
+        trim($description),
+        (int)$id
+    ]);
+
+    if ($fiscal_year) {
+        $pdb->query("UPDATE {$table} SET fiscal_year = ? WHERE id = ?", [(int)$fiscal_year, (int)$id]);
     }
 
     if ($user_ids !== null) {
@@ -925,7 +904,7 @@ function budsheets_clone_budget($source_lob_id, $target_name, $target_code, $tar
     $assignedUsers = budsheets_get_lob_users($source_lob_id);
 
     // 1. Create new target Budget assigned to target_fiscal_year
-    $newLobId = budsheets_add_lob($target_name, $target_code, $sourceLob['description'], $assignedUsers, $target_fiscal_year, $sourceLob['notification_emails'] ?? '');
+    $newLobId = budsheets_add_lob($target_name, $target_code, $sourceLob['description'], $assignedUsers, $target_fiscal_year);
     if (!$newLobId) return false;
 
     // 2. Assign same expense classes to new budget
@@ -1802,197 +1781,4 @@ function budsheets_export_items_csv() {
 
     fclose($output);
     exit;
-}
-
-// ==========================================
-// Email & Weekly Budget Summary Reports
-// ==========================================
-
-function budsheets_send_email($to, $subject, $body, $headers = []) {
-    if (function_exists('send_email')) {
-        return send_email($to, $subject, $body, $headers);
-    }
-    if (function_exists('wp_mail')) {
-        return wp_mail($to, $subject, $body, $headers);
-    }
-    $defaultHeaders = [
-        'MIME-Version: 1.0',
-        'Content-type: text/html; charset=utf-8',
-        'From: BudSheets Operational Budgets <noreply@portal.local>'
-    ];
-    $mergedHeaders = array_merge($defaultHeaders, is_array($headers) ? $headers : [$headers]);
-    return @mail($to, $subject, $body, implode("\r\n", $mergedHeaders));
-}
-
-function budsheets_generate_weekly_summary_html($fiscal_year = null) {
-    if ($fiscal_year === null || $fiscal_year === '') {
-        $fiscal_year = budsheets_get_fiscal_year();
-    } else {
-        $fiscal_year = (int)$fiscal_year;
-    }
-
-    $summary = budsheets_get_dashboard_summary($fiscal_year);
-    $lobs = budsheets_get_lobs(null, $fiscal_year);
-    $items = budsheets_get_items(null, $fiscal_year);
-
-    $html = '
-    <!DOCTYPE html>
-    <html>
-    <head>
-        <meta charset="utf-8">
-        <title>Weekly Operational Budget Summary - FY' . $fiscal_year . '</title>
-        <style>
-            body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; color: #212529; background-color: #f8f9fa; margin: 0; padding: 20px; }
-            .container { max-width: 700px; margin: 0 auto; background: #ffffff; padding: 25px; border-radius: 8px; border: 1px solid #e9ecef; }
-            .header { border-bottom: 2px solid #0d6efd; padding-bottom: 15px; margin-bottom: 20px; }
-            .header h1 { margin: 0; color: #0d6efd; font-size: 22px; }
-            .header p { margin: 5px 0 0 0; color: #6c757d; font-size: 13px; }
-            .kpi-table { width: 100%; border-collapse: collapse; margin-bottom: 25px; }
-            .kpi-card { background: #f1f5f9; padding: 15px; text-align: center; border-radius: 6px; }
-            .kpi-card .number { font-size: 20px; font-weight: bold; color: #0f172a; margin-top: 5px; }
-            .kpi-card .label { font-size: 11px; text-transform: uppercase; color: #64748b; font-weight: 600; }
-            .data-table { width: 100%; border-collapse: collapse; font-size: 13px; }
-            .data-table th { background: #f8fafc; border-bottom: 2px solid #cbd5e1; text-align: left; padding: 10px; color: #334155; }
-            .data-table td { border-bottom: 1px solid #e2e8f0; padding: 10px; color: #1e293b; }
-            .footer { margin-top: 25px; pt-3; border-top: 1px solid #e2e8f0; font-size: 11px; color: #94a3b8; text-align: center; }
-        </style>
-    </head>
-    <body>
-        <div class="container">
-            <div class="header">
-                <h1>Weekly Budget Summary Report (FY' . $fiscal_year . ')</h1>
-                <p>Generated on ' . date('F j, Y - H:i T') . ' | Operational Budget Sheets (BudSheets)</p>
-            </div>
-
-            <table class="kpi-table">
-                <tr>
-                    <td style="width: 25%; padding: 4px;">
-                        <div class="kpi-card">
-                            <div class="label">Budgets</div>
-                            <div class="number">' . (int)$summary['lob_count'] . '</div>
-                        </div>
-                    </td>
-                    <td style="width: 25%; padding: 4px;">
-                        <div class="kpi-card">
-                            <div class="label">Budget Items</div>
-                            <div class="number">' . (int)$summary['item_count'] . '</div>
-                        </div>
-                    </td>
-                    <td style="width: 25%; padding: 4px;">
-                        <div class="kpi-card">
-                            <div class="label">Monthly Total (CAD)</div>
-                            <div class="number">$' . number_format((float)$summary['monthly_cost_cad'], 2) . '</div>
-                        </div>
-                    </td>
-                    <td style="width: 25%; padding: 4px;">
-                        <div class="kpi-card">
-                            <div class="label">Total Invoiced (CAD)</div>
-                            <div class="number" style="color: #16a34a;">$' . number_format((float)$summary['total_invoiced_cad'], 2) . '</div>
-                        </div>
-                    </td>
-                </tr>
-            </table>
-
-            <h3 style="font-size: 16px; margin-bottom: 12px; color: #0f172a;">Budget Allocations Breakdown (CAD)</h3>
-            <table class="data-table">
-                <thead>
-                    <tr>
-                        <th>Budget</th>
-                        <th>Code</th>
-                        <th style="text-align: center;">Items</th>
-                        <th>Monthly Avg (w/ Tax)</th>
-                        <th>Annual Total (w/ Tax)</th>
-                    </tr>
-                </thead>
-                <tbody>';
-
-    if (empty($lobs)) {
-        $html .= '<tr><td colspan="5" style="text-align: center; color: #94a3b8;">No Budgets found for FY' . $fiscal_year . '.</td></tr>';
-    } else {
-        foreach ($lobs as $lob) {
-            $lobItems = array_filter($items, function($i) use ($lob) { return $i['lob_id'] == $lob['id']; });
-            $lobFy = !empty($lob['fiscal_year']) ? (int)$lob['fiscal_year'] : $fiscal_year;
-            $lobMonthlyTotalCad = 0.0;
-            $lobAnnualTotalCad = 0.0;
-            foreach ($lobItems as $li) {
-                $fyCalc = budsheets_calculate_item_fy_cost($li, $lobFy);
-                $lobMonthlyTotalCad += budsheets_convert_to_cad($fyCalc['monthly_total'], $li['currency'], $lobFy);
-                $lobAnnualTotalCad += budsheets_convert_to_cad($fyCalc['annual_total'], $li['currency'], $lobFy);
-            }
-
-            $html .= '<tr>
-                <td><strong>' . htmlspecialchars($lob['name']) . '</strong></td>
-                <td>' . htmlspecialchars($lob['code'] ?: 'N/A') . '</td>
-                <td style="text-align: center;">' . count($lobItems) . '</td>
-                <td style="font-weight: 600; color: #2563eb;">$' . number_format($lobMonthlyTotalCad, 2) . ' CAD</td>
-                <td style="font-weight: 600; color: #16a34a;">$' . number_format($lobAnnualTotalCad, 2) . ' CAD</td>
-            </tr>';
-        }
-    }
-
-    $html .= '
-                </tbody>
-            </table>
-
-            <div class="footer">
-                <p>This automated email summary was dispatched by BudSheets Operational Budget Tracker.</p>
-            </div>
-        </div>
-    </body>
-    </html>';
-
-    return $html;
-}
-
-function budsheets_send_weekly_summary_report($fiscal_year = null, $target_email = null) {
-    if ($fiscal_year === null || $fiscal_year === '') {
-        $fiscal_year = budsheets_get_fiscal_year();
-    } else {
-        $fiscal_year = (int)$fiscal_year;
-    }
-
-    $subject = "Weekly Operational Budget Summary - FY" . $fiscal_year . " (" . date('M j, Y') . ")";
-    $body = budsheets_generate_weekly_summary_html($fiscal_year);
-
-    $recipients = [];
-
-    if (!empty($target_email) && filter_var($target_email, FILTER_VALIDATE_EMAIL)) {
-        $recipients[] = trim($target_email);
-    } else {
-        // Collect budget-specific notification emails
-        $lobs = budsheets_get_lobs(null, $fiscal_year);
-        foreach ($lobs as $lob) {
-            if (!empty($lob['notification_emails'])) {
-                $rawEmails = preg_split('/[\s,;\n]+/', $lob['notification_emails']);
-                foreach ($rawEmails as $e) {
-                    $e = trim($e);
-                    if (!empty($e) && filter_var($e, FILTER_VALIDATE_EMAIL)) {
-                        $recipients[] = $e;
-                    }
-                }
-            }
-        }
-
-        // Collect system user emails
-        $systemUsers = budsheets_get_all_system_users();
-        foreach ($systemUsers as $u) {
-            if (!empty($u['email']) && filter_var($u['email'], FILTER_VALIDATE_EMAIL)) {
-                $recipients[] = trim($u['email']);
-            }
-        }
-    }
-
-    $recipients = array_unique($recipients);
-    if (empty($recipients)) {
-        return false;
-    }
-
-    $success = true;
-    foreach ($recipients as $email) {
-        if (!budsheets_send_email($email, $subject, $body)) {
-            $success = false;
-        }
-    }
-
-    return $success;
 }
